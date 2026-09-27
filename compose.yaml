@@ -1,0 +1,50 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      LISTEN_ADDR: ":8080"
+      SESSION_SECRET: "${SESSION_SECRET:?Set SESSION_SECRET in .env}"
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: "${DB_NAME:-campusclaw}"
+      DB_USER: "${DB_USER:-campusclaw}"
+      DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
+      UPLOAD_DIR: /data/uploads
+      MAX_UPLOAD_BYTES: "${MAX_UPLOAD_BYTES:-10485760}"
+      SESSION_TTL_SECONDS: "${SESSION_TTL_SECONDS:-28800}"
+      LOGIN_FAILURE_THRESHOLD: "${LOGIN_FAILURE_THRESHOLD:-5}"
+      SEED_TEACHER_A_PASSWORD: "${SEED_TEACHER_A_PASSWORD:?Set SEED_TEACHER_A_PASSWORD in .env}"
+      SEED_STUDENT_A1_PASSWORD: "${SEED_STUDENT_A1_PASSWORD:?Set SEED_STUDENT_A1_PASSWORD in .env}"
+      SEED_STUDENT_B1_PASSWORD: "${SEED_STUDENT_B1_PASSWORD:?Set SEED_STUDENT_B1_PASSWORD in .env}"
+    volumes:
+      - uploads_data:/data/uploads
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD in .env}"
+      MYSQL_DATABASE: "${DB_NAME:-campusclaw}"
+      MYSQL_USER: "${DB_USER:-campusclaw}"
+      MYSQL_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  uploads_data:
