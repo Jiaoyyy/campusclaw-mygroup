@@ -22,6 +22,14 @@ type Config struct {
 	SeedTeacherAPassword  string
 	SeedStudentA1Password string
 	SeedStudentB1Password string
+	EmbeddingBaseURL      string
+	EmbeddingAPIKey       string
+	EmbeddingModel        string
+	ChatBaseURL           string
+	ChatAPIKey            string
+	ChatModel             string
+	QdrantURL             string
+	QdrantCollection      string
 }
 
 func Load() (Config, error) {
@@ -77,6 +85,20 @@ func Load() (Config, error) {
 	cfg.SessionTTL = time.Duration(ttlSeconds) * time.Second
 	if cfg.LoginFailureThreshold, err = positiveInt("LOGIN_FAILURE_THRESHOLD"); err != nil {
 		return Config{}, err
+	}
+	cfg.EmbeddingBaseURL = os.Getenv("EMBEDDING_BASE_URL")
+	cfg.EmbeddingAPIKey = os.Getenv("EMBEDDING_API_KEY")
+	cfg.EmbeddingModel = os.Getenv("EMBEDDING_MODEL")
+	cfg.ChatBaseURL = os.Getenv("CHAT_BASE_URL")
+	cfg.ChatAPIKey = os.Getenv("CHAT_API_KEY")
+	cfg.ChatModel = os.Getenv("CHAT_MODEL")
+	cfg.QdrantURL = os.Getenv("QDRANT_URL")
+	if cfg.QdrantURL == "" {
+		cfg.QdrantURL = "http://qdrant:6333"
+	}
+	cfg.QdrantCollection = os.Getenv("QDRANT_COLLECTION")
+	if cfg.QdrantCollection == "" {
+		cfg.QdrantCollection = "campusclaw_chunks"
 	}
 
 	return cfg, nil

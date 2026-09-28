@@ -1,14 +1,14 @@
-# CampusClaw · 第 3 课基础与第 4 课检索 MVP
+# CampusClaw · 第 3 课基础与第 4 课可追溯检索
 
-按[第 3 课课件](https://devops.hello1023.com/%E8%AF%BE%E4%BB%B6/%E7%AC%AC3%E8%AF%BE-%E8%AF%BE%E4%BB%B6-%E8%AE%A4%E8%AF%81%E6%8E%88%E6%9D%83%E4%B8%8E%E7%9F%A5%E8%AF%86%E5%BA%93%E5%85%A5%E5%BA%93/index.html)实现的教学材料库，并在此基础上添加[第 4 课](https://devops.hello1023.com/%E8%AF%BE%E4%BB%B6/%E7%AC%AC4%E8%AF%BE-%E8%AF%BE%E4%BB%B6-%E5%8F%AF%E8%BF%BD%E6%BA%AF%E7%9F%A5%E8%AF%86%E5%BA%93%E6%A3%80%E7%B4%A2/index.html)关键词检索 MVP。前端为 React 18、TypeScript、Vite；Nginx 提供同源入口；Go `net/http` 提供 API；MySQL 8.0 保存账号、服务端会话、材料与知识库正文。Docker Compose 是标准启动方式。
+按[第 3 课课件](https://devops.hello1023.com/%E8%AF%BE%E4%BB%B6/%E7%AC%AC3%E8%AF%BE-%E8%AF%BE%E4%BB%B6-%E8%AE%A4%E8%AF%81%E6%8E%88%E6%9D%83%E4%B8%8E%E7%9F%A5%E8%AF%86%E5%BA%93%E5%85%A5%E5%BA%93/index.html)实现的教学材料库，并在此基础上实现[第 4 课](https://devops.hello1023.com/%E8%AF%BE%E4%BB%B6/%E7%AC%AC4%E8%AF%BE-%E8%AF%BE%E4%BB%B6-%E5%8F%AF%E8%BF%BD%E6%BA%AF%E7%9F%A5%E8%AF%86%E5%BA%93%E6%A3%80%E7%B4%A2/index.html)的持久切片、三种检索与可追溯简短回答。前端为 React 18、TypeScript、Vite；Nginx 提供同源入口；Go `net/http` 提供 API；MySQL 8.0 保存账号、会话、原文和切片；Qdrant 保存向量。Docker Compose 是标准启动方式。
 
-本课只接收 UTF-8 `.txt`、`.md`：A 班教师可以上传本班文件，A 班师生可以在列表查找文件名、查看提取正文并经鉴权下载原文件。学生上传返回 403；跨班材料 ID 和不存在的 ID 都返回相同的 404。列表来自数据库，没有前端硬编码材料。PDF/DOCX 解析、OCR、向量索引、语义检索、RAG 问答、公开注册、SSO、作业批改与生产多副本均不在本课范围。
+本课只接收 UTF-8 `.txt`、`.md`：A 班教师可以上传本班文件，A 班师生可以在列表查找文件名、查看提取正文并经鉴权下载原文件。学生上传返回 403；跨班材料 ID 和不存在的 ID 都返回相同的 404。列表来自数据库，没有前端硬编码材料。PDF/DOCX 解析、OCR、公开注册、SSO、作业批改、流式长对话与生产多副本不在本课范围。
 
-## 第 4 课检索 MVP
+## 第 4 课检索与回答
 
-材料页新增“本班知识库检索”：已登录教师和学生输入原文中的词语，可检索本班材料的**正文**，与左侧仅筛选文件名的列表功能不同。结果给出原始文件名、材料 ID、固定 400 字符窗口的段号、命中词在原文中的 Unicode 字符范围与附近原文摘录；点击结果会打开已有的受保护材料详情。页面显示的字符位置从 1 开始。没有命中时显示“本班资料中未找到相关内容”。
+上传后原文保持不变，索引器按 `auto`（默认最大 800 字、重叠 80 字）、`custom`（分隔符/长度/重叠/可选预处理）或 `hierarchy`（Markdown 标题）生成切片。切片正文、序号、Unicode 字符范围和状态存于 MySQL `knowledge_chunks`；嵌入向量写入 Compose 内的 Qdrant，点 ID 等于切片 ID，payload 不含正文。已有材料启动时自动补建默认索引。教师可在材料详情按当前策略重建；嵌入失败时原文件与原文仍保留，页面显示索引失败。
 
-同源 API 为 `GET /api/retrieval?q=词语`，需要登录，返回 `{"hits": [...]}`；匿名返回 401，空白或超过 100 字符的查询返回 400，传入 `class_id` 或伪造角色返回 403。班级只从服务端会话取得，结果最多 20 条。该 MVP 使用字面关键词匹配，不做分词、同义词、向量/混合检索或生成式回答，也不新增数据库或上传文件格式。对应 OpenSpec change 为 `openspec/changes/add-traceable-keyword-retrieval/`。
+`GET /api/retrieval?q=问题&mode=keyword|vector|hybrid` 默认 `hybrid`。关键词只查 MySQL ngram FULLTEXT；向量模式先嵌入问题，再按会话班级查询 Qdrant，余弦低于 0.35 的候选丢弃，回 MySQL 时再次核对班级；混合模式在两路过滤后以 RRF（k=60）排序。每条结果包含材料 ID、标题、切片序号、字符范围和取自 MySQL 的摘录，可打开原文。无结果返回空 `hits` 和「资料中未找到相关内容」。`POST /api/ask` 用混合检索取本班前四条，有依据才调用对话网关并返回编号出处；无依据不调用模型。关键词模式在 Qdrant 不可用时仍能使用，向量/混合/问答返回 503。匿名 401、空查询 400；客户端传入的班级或角色字段被忽略，授权始终使用会话班级。新增完整变更为 `openspec/changes/add-traceable-vector-retrieval/`，先前关键词 MVP 保留在 `add-traceable-keyword-retrieval/`。
 
 ## 从零启动
 
@@ -18,7 +18,7 @@
 cp .env.example .env
 ```
 
-编辑 `.env`，把 `SESSION_SECRET`、`DB_PASSWORD`、`DB_ROOT_PASSWORD` 和三个 `SEED_*_PASSWORD` 的占位符全部换成各自独立的强随机值。`.env` 已被 Git 与 Docker 构建上下文排除，不要提交或粘贴真实值。`DB_ROOT_PASSWORD` 只提供给 MySQL 初始化，API 容器只接收普通 `DB_USER`/`DB_PASSWORD`。可按需修改 `WEB_PORT`（默认 8080）和 `MAX_UPLOAD_BYTES`（默认 10485760）。
+编辑 `.env`，把 `SESSION_SECRET`、`DB_PASSWORD`、`DB_ROOT_PASSWORD` 和三个 `SEED_*_PASSWORD` 的占位符全部换成各自独立的强随机值。另填课程网关的 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY` 及 `CHAT_BASE_URL`、`CHAT_MODEL`、`CHAT_API_KEY`。Base URL 应指向兼容 OpenAI 的 `/v1` 根路径，Go 服务会分别追加 `/embeddings` 与 `/chat/completions`。模型密钥只交给 API 容器，不进入浏览器或仓库。若暂未配置网关，材料仍可保存，但索引标记失败；配置后重启会自动重试，也可由教师手动重建。`.env` 已被 Git 与 Docker 构建上下文排除。可按需修改 `WEB_PORT`（默认 8080）和 `MAX_UPLOAD_BYTES`（默认 10485760）。
 
 ```sh
 docker compose up --build -d
@@ -43,7 +43,7 @@ set +a
 python3 scripts/verify_flow.py
 ```
 
-脚本只输出状态码、材料 ID 和列表数量，不打印密码或会话 Cookie。它验证教师上传、A 班学生查看和下载、B 班跨班 404、匿名 401、学生上传 403、缺失 CSRF 403 与不支持扩展名 400。服务端还对空文件、非法 UTF-8 返回 400，对超限文件返回 413；数据库和磁盘写入失败时回滚记录并清理文件。Go 的 MySQL 集成测试覆盖这些边界与种子幂等性。
+脚本需要可用的嵌入与对话网关，仅输出状态码、材料 ID 和列表数量，不打印密码或会话 Cookie。它验证教师上传、三种检索、可追溯出处、问答、无依据、教师重建、A/B 隔离、匿名 401、学生上传 403 与不支持扩展名 400。服务端还对空文件、非法 UTF-8 返回 400，对超限文件返回 413；数据库和磁盘写入失败时回滚记录并清理文件。可用 `scripts/mock_gateway.py` 在隔离测试环境模拟兼容 OpenAI 的接口；该脚本只验证链路，不提供真实语义检索能力。
 
 遇到启动问题先执行 `docker compose ps` 与 `docker compose logs --tail=100 api db web`。缺少必需环境变量会在 Compose 配置或 API 启动时失败；错误只指明变量名。若端口已被占用，在 `.env` 调整 `WEB_PORT`。数据库与上传文件都使用具名卷，不要用容器内临时目录替代。
 

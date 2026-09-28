@@ -1,10 +1,13 @@
 package retrieval
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"net/http"
+	"sort"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"campusclaw/backend/internal/auth"
@@ -13,108 +16,234 @@ import (
 const (
 	maxQueryRunes = 100
 	maxHits       = 20
-	chunkRunes    = 400
-	contextRunes  = 60
+	noEvidence    = "资料中未找到相关内容"
 )
 
 type Hit struct {
-	MaterialID int64  `json:"material_id"`
-	Title      string `json:"title"`
-	ChunkIndex int    `json:"chunk_index"`
-	Start      int    `json:"start_offset"`
-	End        int    `json:"end_offset"`
-	Snippet    string `json:"snippet"`
+	ChunkID    int64   `json:"chunk_id"`
+	MaterialID int64   `json:"material_id"`
+	Title      string  `json:"title"`
+	ChunkIndex int     `json:"chunk_index"`
+	Start      int     `json:"start_offset"`
+	End        int     `json:"end_offset"`
+	Snippet    string  `json:"snippet"`
+	Score      float64 `json:"score"`
+	ChunkText  string  `json:"-"`
 }
 
 type Service struct {
 	database *sql.DB
 	auth     *auth.Service
+	embedder Embedder
+	vectors  VectorStore
+	answerer Answerer
 }
 
-func New(database *sql.DB, authentication *auth.Service) *Service {
-	return &Service{database: database, auth: authentication}
+func New(database *sql.DB, authentication *auth.Service, embedder Embedder, vectors VectorStore, answerer Answerer) *Service {
+	return &Service{database: database, auth: authentication, embedder: embedder, vectors: vectors, answerer: answerer}
 }
 
 func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/retrieval", s.Search)
+	mux.HandleFunc("POST /api/ask", s.Ask)
 }
 
 func (s *Service) Search(w http.ResponseWriter, r *http.Request) {
 	identity, _, status := s.auth.Current(r)
 	if status != 0 {
-		if status == http.StatusUnauthorized {
-			auth.WriteError(w, status, "authentication required")
-		} else {
-			auth.WriteError(w, status, "service unavailable")
-		}
+		writeStatus(w, status)
 		return
 	}
-	query := r.URL.Query()
-	if query.Has("class_id") || query.Has("role") || r.Header.Get("X-Class-ID") != "" || r.Header.Get("X-Role") != "" {
-		auth.WriteError(w, http.StatusForbidden, "identity override rejected")
+	term := strings.TrimSpace(r.URL.Query().Get("q"))
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "hybrid"
+	}
+	if !validQuery(term) || !validMode(mode) {
+		auth.WriteError(w, http.StatusBadRequest, "invalid retrieval query or mode")
 		return
 	}
-	term := strings.TrimSpace(query.Get("q"))
-	if term == "" || utf8.RuneCountInString(term) > maxQueryRunes {
-		auth.WriteError(w, http.StatusBadRequest, "query must be 1-100 characters")
-		return
-	}
-	rows, err := s.database.QueryContext(r.Context(), `SELECT m.id, m.original_filename, k.body
-		FROM knowledge_entries k JOIN materials m ON m.id = k.material_id AND m.class_id = k.class_id
-		WHERE k.class_id = ? ORDER BY m.created_at DESC, m.id DESC`, identity.ClassID)
+	hits, err := s.search(r.Context(), identity.ClassID, term, mode, maxHits)
 	if err != nil {
-		auth.WriteError(w, http.StatusServiceUnavailable, "service unavailable")
+		writeStatus(w, http.StatusServiceUnavailable)
 		return
+	}
+	message := ""
+	if len(hits) == 0 {
+		message = noEvidence
+	}
+	auth.WriteJSON(w, http.StatusOK, map[string]any{"hits": hits, "mode": mode, "message": message})
+}
+
+func (s *Service) Ask(w http.ResponseWriter, r *http.Request) {
+	identity, token, status := s.auth.Current(r)
+	if status != 0 {
+		writeStatus(w, status)
+		return
+	}
+	if !s.auth.ValidCSRF(r, token) {
+		auth.WriteError(w, http.StatusForbidden, "invalid csrf token")
+		return
+	}
+	var input struct {
+		Question string `json:"question"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&input); err != nil {
+		auth.WriteError(w, http.StatusBadRequest, "invalid question")
+		return
+	}
+	input.Question = strings.TrimSpace(input.Question)
+	if !validQuery(input.Question) {
+		auth.WriteError(w, http.StatusBadRequest, "invalid question")
+		return
+	}
+	hits, err := s.search(r.Context(), identity.ClassID, input.Question, "hybrid", 4)
+	if err != nil {
+		writeStatus(w, http.StatusServiceUnavailable)
+		return
+	}
+	if len(hits) == 0 {
+		auth.WriteJSON(w, http.StatusOK, map[string]any{"answer": noEvidence, "citations": []Hit{}})
+		return
+	}
+	answer, err := s.answerer.Answer(r.Context(), input.Question, hits)
+	if err != nil {
+		writeStatus(w, http.StatusServiceUnavailable)
+		return
+	}
+	auth.WriteJSON(w, http.StatusOK, map[string]any{"answer": answer, "citations": hits})
+}
+
+func validQuery(query string) bool {
+	return query != "" && utf8.RuneCountInString(query) <= maxQueryRunes
+}
+func validMode(mode string) bool { return mode == "keyword" || mode == "vector" || mode == "hybrid" }
+func writeStatus(w http.ResponseWriter, status int) {
+	if status == http.StatusUnauthorized {
+		auth.WriteError(w, status, "authentication required")
+	} else {
+		auth.WriteError(w, status, "service unavailable")
+	}
+}
+
+func (s *Service) search(ctx context.Context, classID int64, term, mode string, limit int) ([]Hit, error) {
+	switch mode {
+	case "keyword":
+		return s.keyword(ctx, classID, term, limit)
+	case "vector":
+		return s.vector(ctx, classID, term, limit)
+	case "hybrid":
+		keywords, err := s.keyword(ctx, classID, term, maxHits)
+		if err != nil {
+			return nil, err
+		}
+		vectors, err := s.vector(ctx, classID, term, maxHits)
+		if err != nil {
+			return nil, err
+		}
+		return fuse(keywords, vectors, limit), nil
+	default:
+		return nil, errors.New("unsupported retrieval mode")
+	}
+}
+
+func (s *Service) keyword(ctx context.Context, classID int64, term string, limit int) ([]Hit, error) {
+	rows, err := s.database.QueryContext(ctx, `SELECT c.id, c.material_id, m.original_filename, c.chunk_index,
+		c.start_offset, c.end_offset, c.chunk_text,
+		MATCH(c.chunk_text) AGAINST (? IN NATURAL LANGUAGE MODE) AS relevance
+		FROM knowledge_chunks c JOIN materials m ON m.id = c.material_id AND m.class_id = c.class_id
+		WHERE c.class_id = ? AND c.index_status = 'ready'
+		AND MATCH(c.chunk_text) AGAINST (? IN NATURAL LANGUAGE MODE) > 0
+		ORDER BY relevance DESC, c.id ASC LIMIT ?`, term, classID, term, limit)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 	hits := make([]Hit, 0)
 	for rows.Next() {
-		var materialID int64
-		var title, body string
-		if err := rows.Scan(&materialID, &title, &body); err != nil {
-			auth.WriteError(w, http.StatusServiceUnavailable, "service unavailable")
-			return
+		var hit Hit
+		if err := rows.Scan(&hit.ChunkID, &hit.MaterialID, &hit.Title, &hit.ChunkIndex, &hit.Start, &hit.End, &hit.ChunkText, &hit.Score); err != nil {
+			return nil, err
 		}
-		for _, hit := range findHits(body, term, materialID, title, maxHits-len(hits)) {
-			hits = append(hits, hit)
-		}
-		if len(hits) == maxHits {
-			break
-		}
+		hit.Snippet = excerpt(hit.ChunkText)
+		hits = append(hits, hit)
 	}
-	if err := rows.Err(); err != nil {
-		auth.WriteError(w, http.StatusServiceUnavailable, "service unavailable")
-		return
-	}
-	auth.WriteJSON(w, http.StatusOK, map[string]any{"hits": hits})
+	return hits, rows.Err()
 }
 
-func findHits(body, term string, materialID int64, title string, limit int) []Hit {
-	if limit <= 0 || term == "" {
-		return nil
+func (s *Service) vector(ctx context.Context, classID int64, term string, limit int) ([]Hit, error) {
+	vector, err := s.embedder.Embed(ctx, term)
+	if err != nil {
+		return nil, err
 	}
-	original := []rune(body)
-	lowerBody := strings.Map(unicode.ToLower, body)
-	lowerTerm := strings.Map(unicode.ToLower, term)
-	termRunes := utf8.RuneCountInString(term)
-	hits := make([]Hit, 0)
-	fromByte, fromRune := 0, 0
-	for len(hits) < limit {
-		relativeByte := strings.Index(lowerBody[fromByte:], lowerTerm)
-		if relativeByte < 0 {
+	points, err := s.vectors.Query(ctx, classID, vector, limit*2)
+	if err != nil {
+		return nil, err
+	}
+	hits := make([]Hit, 0, limit)
+	for _, point := range points {
+		if point.Score < 0.35 {
+			continue
+		}
+		var hit Hit
+		err := s.database.QueryRowContext(ctx, `SELECT c.id, c.material_id, m.original_filename, c.chunk_index,
+			c.start_offset, c.end_offset, c.chunk_text
+			FROM knowledge_chunks c JOIN materials m ON m.id = c.material_id AND m.class_id = c.class_id
+			WHERE c.id = ? AND c.class_id = ? AND c.index_status = 'ready'`, point.ID, classID).
+			Scan(&hit.ChunkID, &hit.MaterialID, &hit.Title, &hit.ChunkIndex, &hit.Start, &hit.End, &hit.ChunkText)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		hit.Score, hit.Snippet = point.Score, excerpt(hit.ChunkText)
+		hits = append(hits, hit)
+		if len(hits) == limit {
 			break
 		}
-		startByte := fromByte + relativeByte
-		start := fromRune + utf8.RuneCountInString(lowerBody[fromByte:startByte])
-		end := start + termRunes
-		snippetStart := max(0, start-contextRunes)
-		snippetEnd := min(len(original), end+contextRunes)
-		hits = append(hits, Hit{
-			MaterialID: materialID, Title: title, ChunkIndex: start/chunkRunes + 1,
-			Start: start, End: end, Snippet: string(original[snippetStart:snippetEnd]),
-		})
-		fromByte = startByte + len(lowerTerm)
-		fromRune = end
+	}
+	return hits, nil
+}
+
+func fuse(keywords, vectors []Hit, limit int) []Hit {
+	type ranked struct {
+		hit Hit
+		rrf float64
+	}
+	merged := make(map[int64]*ranked)
+	for _, list := range [][]Hit{keywords, vectors} {
+		for rank, hit := range list {
+			entry := merged[hit.ChunkID]
+			if entry == nil {
+				entry = &ranked{hit: hit}
+				merged[hit.ChunkID] = entry
+			}
+			entry.rrf += 1 / float64(60+rank+1)
+		}
+	}
+	all := make([]ranked, 0, len(merged))
+	for _, entry := range merged {
+		entry.hit.Score = entry.rrf
+		all = append(all, *entry)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].rrf == all[j].rrf {
+			return all[i].hit.ChunkID < all[j].hit.ChunkID
+		}
+		return all[i].rrf > all[j].rrf
+	})
+	hits := make([]Hit, 0, min(limit, len(all)))
+	for i := 0; i < len(all) && i < limit; i++ {
+		hits = append(hits, all[i].hit)
 	}
 	return hits
+}
+
+func excerpt(text string) string {
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) > 180 {
+		return string(runes[:180]) + "…"
+	}
+	return string(runes)
 }

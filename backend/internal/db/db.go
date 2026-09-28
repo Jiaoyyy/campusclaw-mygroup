@@ -14,7 +14,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
-//go:embed migrations/001_init.sql
+//go:embed migrations/*.sql
 var migrations embed.FS
 
 func Open(cfg config.Config) (*sql.DB, error) {
@@ -38,17 +38,26 @@ func Open(cfg config.Config) (*sql.DB, error) {
 }
 
 func Migrate(ctx context.Context, database *sql.DB) error {
-	schema, err := migrations.ReadFile("migrations/001_init.sql")
+	files, err := migrations.ReadDir("migrations")
 	if err != nil {
-		return fmt.Errorf("read database schema: %w", err)
+		return fmt.Errorf("list database migrations: %w", err)
 	}
-	for _, statement := range strings.Split(string(schema), ";") {
-		statement = strings.TrimSpace(statement)
-		if statement == "" {
+	for _, file := range files {
+		if file.IsDir() || !strings.HasSuffix(file.Name(), ".sql") {
 			continue
 		}
-		if _, err := database.ExecContext(ctx, statement); err != nil {
-			return fmt.Errorf("apply database schema: %w", err)
+		schema, err := migrations.ReadFile("migrations/" + file.Name())
+		if err != nil {
+			return fmt.Errorf("read database migration %s: %w", file.Name(), err)
+		}
+		for _, statement := range strings.Split(string(schema), ";") {
+			statement = strings.TrimSpace(statement)
+			if statement == "" {
+				continue
+			}
+			if _, err := database.ExecContext(ctx, statement); err != nil {
+				return fmt.Errorf("apply database migration %s: %w", file.Name(), err)
+			}
 		}
 	}
 	return nil

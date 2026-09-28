@@ -67,6 +67,18 @@
 
 补充运行检查：猜测 `/uploads/guessed-file` 返回 Nginx 404；Vite 开发代理与 Compose 入口的匿名 `/api/me` 均返回 JSON 401。`docker compose config` 仅 web 映射宿主端口，上传卷只挂载 api。`npm run test:ui` 检查学生页面没有上传控件，教师页面有。`go test ./...`、`go build`、`npm run build` 和 OpenSpec 严格校验均通过。
 
-## 第 4 课关键词检索 MVP
+## 第 4 课早期关键词检索 MVP（历史记录）
 
 `scripts/verify_flow.py` 在运行中的 Compose 环境上传 A 班测试材料后，用 A 班学生检索正文得到带材料 ID、标题、摘录和字符范围的命中；B 班学生检索同一 A 班专属词返回空数组。匿名检索为 401，客户端指定 `class_id=2` 为 403。Go 单元测试验证中文字数位置、大小写匹配、字面 `%` 与结果上限；`npm run test:ui` 验证师生页面都有检索入口。无向量库或生成式回答，边界见 `openspec/changes/add-traceable-keyword-retrieval/`。
+
+## 第 4 课完整 MVP 验收（2026-09-28）
+
+在独立的 `cc-week04-check` Compose 项目及端口 `18083` 验证，未使用原有的 `18082` 应用和数据卷。使用 `scripts/mock_gateway.py` 模拟 OpenAI 兼容的嵌入和对话端点；它验证接口、索引与权限链路，不证明真实模型的语义质量。
+
+- `go test ./...`、`npm run test:ui`、`npm run test:markdown`、`npm run build` 通过；`openspec validate add-traceable-vector-retrieval --strict` 通过。
+- `scripts/verify_flow.py` 通过：教师上传后索引 `ready`，A 班学生的 keyword/vector/hybrid 均能命中并看到材料标题、切片号、Unicode 范围、摘录；B 班列表、详情、下载、检索均不能看到 A 班材料。客户端伪造 `class_id=2` 不改变会话班级。
+- 有证据的 `/api/ask` 返回编号引用；无证据时返回「资料中未找到相关内容」与空引用，模拟网关计数确认未调用对话模型。教师可用 hierarchy 重建索引，学生重建 403。
+- 停止隔离 Qdrant 后，keyword 为 200，vector/hybrid 为 503；重启后恢复。
+- 将隔离数据库中的一条 custom 切片标为 failed 再重启 API，后台重试将同一切片 ID `8` 从 failed 改为 ready，`strategy=custom` 保持不变；已有种子材料在启动时自动补建切片。
+
+真实课程网关的地址、模型名和密钥尚待本地配置，因此真实语义相关性和实际模型回答仍需配置后复验。密钥只放在本地 `.env`，不进入提交。

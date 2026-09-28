@@ -14,17 +14,20 @@ export type Material = {
   mime: string
   size_bytes: number
   created_at: string
+  index_status: 'pending' | 'ready' | 'failed'
 }
 
 export type MaterialDetail = Material & { body: string }
 
 export type RetrievalHit = {
+  chunk_id: number
   material_id: number
   title: string
   chunk_index: number
   start_offset: number
   end_offset: number
   snippet: string
+  score: number
 }
 
 export class ApiError extends Error {

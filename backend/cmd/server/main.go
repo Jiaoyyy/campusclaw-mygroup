@@ -42,16 +42,33 @@ func main() {
 		log.Fatal("authentication initialization failed")
 	}
 	mux := http.NewServeMux()
+	embedder := retrieval.NewEmbedder(cfg)
+	vectors := retrieval.NewVectorStore(cfg)
+	indexer := retrieval.NewIndexer(database, embedder, vectors)
 	mux.HandleFunc("/api/login", authService.Login)
 	mux.HandleFunc("/api/logout", authService.Logout)
 	mux.HandleFunc("/api/me", authService.Me)
-	materials.New(database, cfg, authService).Register(mux)
-	retrieval.New(database, authService).Register(mux)
+	materials.New(database, cfg, authService).WithIndexer(indexer).Register(mux)
+	retrieval.New(database, authService, embedder, vectors, retrieval.NewAnswerer(cfg)).Register(mux)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		auth.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
 	log.Printf("listening on %s", cfg.ListenAddr)
+	go func() {
+		for {
+			indexCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			failed, err := indexer.Backfill(indexCtx)
+			cancel()
+			if err != nil || failed > 0 {
+				log.Printf("index backfill: %d materials need retry", failed)
+			}
+			if cfg.EmbeddingBaseURL == "" || cfg.EmbeddingModel == "" {
+				return // Restart with gateway configuration to retry failed chunks.
+			}
+			time.Sleep(2 * time.Minute)
+		}
+	}()
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(server.ListenAndServe())
 }

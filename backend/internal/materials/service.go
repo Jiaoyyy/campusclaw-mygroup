@@ -1,9 +1,11 @@
 package materials
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -13,16 +15,21 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"campusclaw/backend/internal/auth"
+	"campusclaw/backend/internal/chunking"
 	"campusclaw/backend/internal/config"
 )
+
+type Indexer interface {
+	IndexMaterial(context.Context, int64, int64, chunking.Options) error
+}
 
 type Service struct {
 	database *sql.DB
 	cfg      config.Config
 	auth     *auth.Service
+	indexer  Indexer
 }
 
 type Material struct {
@@ -32,6 +39,7 @@ type Material struct {
 	Mime             string    `json:"mime"`
 	SizeBytes        int64     `json:"size_bytes"`
 	CreatedAt        time.Time `json:"created_at"`
+	IndexStatus      string    `json:"index_status"`
 }
 
 type materialRecord struct {
@@ -45,11 +53,14 @@ func New(database *sql.DB, cfg config.Config, authentication *auth.Service) *Ser
 	return &Service{database: database, cfg: cfg, auth: authentication}
 }
 
+func (s *Service) WithIndexer(indexer Indexer) *Service { s.indexer = indexer; return s }
+
 func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/materials", s.List)
 	mux.HandleFunc("POST /api/materials", s.Upload)
 	mux.HandleFunc("GET /api/materials/{id}", s.Detail)
 	mux.HandleFunc("GET /api/materials/{id}/file", s.Download)
+	mux.HandleFunc("POST /api/materials/{id}/reindex", s.Reindex)
 }
 
 func (s *Service) List(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +78,10 @@ func (s *Service) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pattern := "%" + search + "%"
-	rows, err := s.database.QueryContext(r.Context(), `SELECT m.id, m.original_filename, COALESCE(u.username, 'system'), m.mime, m.size_bytes, m.created_at
+	rows, err := s.database.QueryContext(r.Context(), `SELECT m.id, m.original_filename, COALESCE(u.username, 'system'), m.mime, m.size_bytes, m.created_at,
+		(SELECT CASE WHEN SUM(c.index_status = 'failed') > 0 THEN 'failed'
+		WHEN SUM(c.index_status = 'pending') > 0 THEN 'pending'
+		WHEN COUNT(*) > 0 THEN 'ready' ELSE 'pending' END FROM knowledge_chunks c WHERE c.material_id = m.id)
 		FROM materials m LEFT JOIN users u ON u.id = m.uploader_id
 		WHERE m.class_id = ? AND m.original_filename LIKE ?
 		ORDER BY m.created_at DESC, m.id DESC`, identity.ClassID, pattern)
@@ -79,7 +93,7 @@ func (s *Service) List(w http.ResponseWriter, r *http.Request) {
 	items := make([]Material, 0)
 	for rows.Next() {
 		var item Material
-		if err := rows.Scan(&item.ID, &item.OriginalFilename, &item.Uploader, &item.Mime, &item.SizeBytes, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.OriginalFilename, &item.Uploader, &item.Mime, &item.SizeBytes, &item.CreatedAt, &item.IndexStatus); err != nil {
 			auth.WriteError(w, http.StatusServiceUnavailable, "service unavailable")
 			return
 		}
@@ -161,35 +175,16 @@ func (s *Service) Upload(w http.ResponseWriter, r *http.Request) {
 		auth.WriteError(w, http.StatusBadRequest, "multipart file required")
 		return
 	}
-	part, err := reader.NextPart()
-	if err != nil || part.FormName() != "file" || part.FileName() == "" {
-		auth.WriteError(w, http.StatusBadRequest, "file required")
-		return
-	}
-	filename := filepath.Base(strings.ReplaceAll(part.FileName(), "\\", "/"))
-	extension := strings.ToLower(filepath.Ext(filename))
-	if len(filename) > 255 || (extension != ".txt" && extension != ".md") {
-		auth.WriteError(w, http.StatusBadRequest, "only .txt and .md files are supported")
-		return
-	}
-	content, err := io.ReadAll(io.LimitReader(part, s.cfg.MaxUploadBytes+1))
+	input, err := readUpload(reader, s.cfg.MaxUploadBytes)
 	if err != nil {
-		auth.WriteError(w, http.StatusBadRequest, "file read failed")
+		status := http.StatusBadRequest
+		if errors.Is(err, errTooLarge) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		auth.WriteError(w, status, err.Error())
 		return
 	}
-	if int64(len(content)) > s.cfg.MaxUploadBytes {
-		auth.WriteError(w, http.StatusRequestEntityTooLarge, "file too large")
-		return
-	}
-	if !utf8.Valid(content) || strings.TrimSpace(string(content)) == "" {
-		auth.WriteError(w, http.StatusBadRequest, "non-empty UTF-8 text required")
-		return
-	}
-	next, err := reader.NextPart()
-	if err != io.EOF || next != nil {
-		auth.WriteError(w, http.StatusBadRequest, "only one file is allowed")
-		return
-	}
+	filename, extension, content := input.filename, input.extension, input.content
 	key, err := randomStorageKey()
 	if err != nil {
 		auth.WriteError(w, http.StatusInternalServerError, "upload unavailable")
@@ -250,7 +245,58 @@ func (s *Service) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	committed = true
-	auth.WriteJSON(w, http.StatusCreated, map[string]int64{"id": id})
+	indexStatus := "pending"
+	if s.indexer != nil {
+		if err := s.indexer.IndexMaterial(r.Context(), id, identity.ClassID, input.options); err != nil {
+			indexStatus = "failed"
+		} else {
+			indexStatus = "ready"
+		}
+	}
+	auth.WriteJSON(w, http.StatusCreated, map[string]any{"id": id, "index_status": indexStatus})
+}
+
+func (s *Service) Reindex(w http.ResponseWriter, r *http.Request) {
+	identity, token, ok := s.current(w, r)
+	if !ok {
+		return
+	}
+	if identity.Role != "teacher" {
+		auth.WriteError(w, http.StatusForbidden, "teacher role required")
+		return
+	}
+	if !s.auth.ValidCSRF(r, token) {
+		auth.WriteError(w, http.StatusForbidden, "invalid csrf token")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		materialError(w, http.StatusNotFound)
+		return
+	}
+	var exists int64
+	if err := s.database.QueryRowContext(r.Context(), "SELECT id FROM materials WHERE id = ? AND class_id = ?", id, identity.ClassID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			materialError(w, http.StatusNotFound)
+		} else {
+			materialError(w, http.StatusServiceUnavailable)
+		}
+		return
+	}
+	var options chunking.Options
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&options); err != nil {
+		auth.WriteError(w, http.StatusBadRequest, "invalid chunking options")
+		return
+	}
+	if _, err := options.Normalized(); err != nil {
+		auth.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if s.indexer == nil || s.indexer.IndexMaterial(r.Context(), id, identity.ClassID, options) != nil {
+		auth.WriteError(w, http.StatusServiceUnavailable, "indexing failed; original material retained")
+		return
+	}
+	auth.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "index_status": "ready"})
 }
 
 func (s *Service) current(w http.ResponseWriter, r *http.Request) (auth.Identity, string, bool) {
@@ -268,10 +314,13 @@ func (s *Service) find(r *http.Request, classID int64) (materialRecord, int) {
 		return materialRecord{}, http.StatusNotFound
 	}
 	var record materialRecord
-	err = s.database.QueryRowContext(r.Context(), `SELECT m.id, m.class_id, m.original_filename, COALESCE(u.username, 'system'), m.storage_key, m.mime, m.size_bytes, m.created_at, k.body
+	err = s.database.QueryRowContext(r.Context(), `SELECT m.id, m.class_id, m.original_filename, COALESCE(u.username, 'system'), m.storage_key, m.mime, m.size_bytes, m.created_at, k.body,
+		(SELECT CASE WHEN SUM(c.index_status = 'failed') > 0 THEN 'failed'
+		WHEN SUM(c.index_status = 'pending') > 0 THEN 'pending'
+		WHEN COUNT(*) > 0 THEN 'ready' ELSE 'pending' END FROM knowledge_chunks c WHERE c.material_id = m.id)
 		FROM materials m LEFT JOIN users u ON u.id = m.uploader_id
 		JOIN knowledge_entries k ON k.material_id = m.id
-		WHERE m.id = ?`, id).Scan(&record.ID, &record.classID, &record.OriginalFilename, &record.Uploader, &record.storageKey, &record.Mime, &record.SizeBytes, &record.CreatedAt, &record.body)
+		WHERE m.id = ?`, id).Scan(&record.ID, &record.classID, &record.OriginalFilename, &record.Uploader, &record.storageKey, &record.Mime, &record.SizeBytes, &record.CreatedAt, &record.body, &record.IndexStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return materialRecord{}, http.StatusNotFound
 	}
