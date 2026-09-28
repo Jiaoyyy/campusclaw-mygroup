@@ -249,6 +249,8 @@ func (s *Service) Upload(w http.ResponseWriter, r *http.Request) {
 	if s.indexer != nil {
 		if err := s.indexer.IndexMaterial(r.Context(), id, identity.ClassID, input.options); err != nil {
 			indexStatus = "failed"
+		} else if !s.cfg.VectorEnabled() {
+			indexStatus = "failed"
 		} else {
 			indexStatus = "ready"
 		}
@@ -296,7 +298,11 @@ func (s *Service) Reindex(w http.ResponseWriter, r *http.Request) {
 		auth.WriteError(w, http.StatusServiceUnavailable, "indexing failed; original material retained")
 		return
 	}
-	auth.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "index_status": "ready"})
+	indexStatus := "ready"
+	if !s.cfg.VectorEnabled() {
+		indexStatus = "failed"
+	}
+	auth.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "index_status": indexStatus})
 }
 
 func (s *Service) current(w http.ResponseWriter, r *http.Request) (auth.Identity, string, bool) {

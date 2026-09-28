@@ -11,14 +11,15 @@ import (
 )
 
 type Indexer struct {
-	mu       sync.Mutex
-	database *sql.DB
-	embedder Embedder
-	vectors  VectorStore
+	mu            sync.Mutex
+	database      *sql.DB
+	embedder      Embedder
+	vectors       VectorStore
+	vectorEnabled bool
 }
 
-func NewIndexer(database *sql.DB, embedder Embedder, vectors VectorStore) *Indexer {
-	return &Indexer{database: database, embedder: embedder, vectors: vectors}
+func NewIndexer(database *sql.DB, embedder Embedder, vectors VectorStore, vectorEnabled bool) *Indexer {
+	return &Indexer{database: database, embedder: embedder, vectors: vectors, vectorEnabled: vectorEnabled}
 }
 
 // IndexMaterial replaces one material's index. The original material and body
@@ -57,7 +58,7 @@ func (s *Indexer) IndexMaterial(ctx context.Context, materialID, classID int64, 
 	if err != nil {
 		return err
 	}
-	if err := s.vectors.Delete(ctx, oldIDs); err != nil {
+	if err := s.vectors.Delete(ctx, oldIDs); err != nil && s.vectorEnabled {
 		return fmt.Errorf("remove old vectors: %w", err)
 	}
 	tx, err := s.database.BeginTx(ctx, nil)
@@ -83,6 +84,10 @@ func (s *Indexer) IndexMaterial(ctx context.Context, materialID, classID int64, 
 		ids = append(ids, id)
 	}
 	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if !s.vectorEnabled {
+		_, err := s.database.ExecContext(ctx, "UPDATE knowledge_chunks SET index_status = 'failed' WHERE knowledge_entry_id = ? AND class_id = ?", entryID, classID)
 		return err
 	}
 	var firstError error
@@ -111,7 +116,7 @@ func (s *Indexer) IndexMaterial(ctx context.Context, materialID, classID int64, 
 func (s *Indexer) Backfill(ctx context.Context) (int, error) {
 	rows, err := s.database.QueryContext(ctx, `SELECT k.material_id, k.class_id FROM knowledge_entries k
 		WHERE NOT EXISTS (SELECT 1 FROM knowledge_chunks c WHERE c.knowledge_entry_id = k.id)
-		OR EXISTS (SELECT 1 FROM knowledge_chunks c WHERE c.knowledge_entry_id = k.id AND c.index_status IN ('failed', 'pending'))`)
+		OR (? = 1 AND EXISTS (SELECT 1 FROM knowledge_chunks c WHERE c.knowledge_entry_id = k.id AND c.index_status IN ('failed', 'pending')))`, s.vectorEnabled)
 	if err != nil {
 		return 0, err
 	}

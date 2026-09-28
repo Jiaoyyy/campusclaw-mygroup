@@ -8,7 +8,7 @@
 
 上传后原文保持不变，索引器按 `auto`（默认最大 800 字、重叠 80 字）、`custom`（分隔符/长度/重叠/可选预处理）或 `hierarchy`（Markdown 标题）生成切片。切片正文、序号、Unicode 字符范围和状态存于 MySQL `knowledge_chunks`；嵌入向量写入 Compose 内的 Qdrant，点 ID 等于切片 ID，payload 不含正文。已有材料启动时自动补建默认索引。教师可在材料详情按当前策略重建；嵌入失败时原文件与原文仍保留，页面显示索引失败。
 
-`GET /api/retrieval?q=问题&mode=keyword|vector|hybrid` 默认 `hybrid`。关键词只查 MySQL ngram FULLTEXT；向量模式先嵌入问题，再按会话班级查询 Qdrant，余弦低于 0.35 的候选丢弃，回 MySQL 时再次核对班级；混合模式在两路过滤后以 RRF（k=60）排序。每条结果包含材料 ID、标题、切片序号、字符范围和取自 MySQL 的摘录，可打开原文。无结果返回空 `hits` 和「资料中未找到相关内容」。`POST /api/ask` 用混合检索取本班前四条，有依据才调用对话网关并返回编号出处；无依据不调用模型。关键词模式在 Qdrant 不可用时仍能使用，向量/混合/问答返回 503。匿名 401、空查询 400；客户端传入的班级或角色字段被忽略，授权始终使用会话班级。新增完整变更为 `openspec/changes/add-traceable-vector-retrieval/`，先前关键词 MVP 保留在 `add-traceable-keyword-retrieval/`。
+`GET /api/retrieval?q=问题&mode=keyword|vector|hybrid` 在嵌入模型已配置时默认 `hybrid`，否则默认 `keyword`。关键词只查 MySQL ngram FULLTEXT；向量模式先嵌入问题，再按会话班级查询 Qdrant，余弦低于 0.35 的候选丢弃，回 MySQL 时再次核对班级；混合模式在两路过滤后以 RRF（k=60）排序。每条结果包含材料 ID、标题、切片序号、字符范围和取自 MySQL 的摘录，可打开原文。无结果返回空 `hits` 和「资料中未找到相关内容」。`POST /api/ask` 用混合检索取本班前四条，有依据才调用对话网关并返回编号出处；无依据不调用模型。关键词模式在 Qdrant 不可用或嵌入模型未配置时仍能使用，向量/混合/问答返回 503。匿名 401、空查询 400；客户端传入的班级或角色字段被忽略，授权始终使用会话班级。新增完整变更为 `openspec/changes/add-traceable-vector-retrieval/`，先前关键词 MVP 保留在 `add-traceable-keyword-retrieval/`。
 
 ## 从零启动
 
@@ -18,7 +18,7 @@
 cp .env.example .env
 ```
 
-编辑 `.env`，把 `SESSION_SECRET`、`DB_PASSWORD`、`DB_ROOT_PASSWORD` 和三个 `SEED_*_PASSWORD` 的占位符全部换成各自独立的强随机值。另填课程网关的 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY` 及 `CHAT_BASE_URL`、`CHAT_MODEL`、`CHAT_API_KEY`。Base URL 应指向兼容 OpenAI 的 `/v1` 根路径，Go 服务会分别追加 `/embeddings` 与 `/chat/completions`。模型密钥只交给 API 容器，不进入浏览器或仓库。若暂未配置网关，材料仍可保存，但索引标记失败；配置后重启会自动重试，也可由教师手动重建。`.env` 已被 Git 与 Docker 构建上下文排除。可按需修改 `WEB_PORT`（默认 8080）和 `MAX_UPLOAD_BYTES`（默认 10485760）。
+编辑 `.env`，把 `SESSION_SECRET`、`DB_PASSWORD`、`DB_ROOT_PASSWORD` 和三个 `SEED_*_PASSWORD` 的占位符全部换成各自独立的强随机值。若先只用关键词检索，六个模型网关变量保持空白即可：上传和教师重建仍写入 MySQL 切片，页面默认关键词检索。数据库的 `failed` 状态此时仅表示**向量尚未生成**，不妨碍关键词检索。`GET /api/retrieval/capabilities` 可查看当前可用能力。准备开启完整功能时再填 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY` 及 `CHAT_BASE_URL`、`CHAT_MODEL`、`CHAT_API_KEY`。Base URL 应是兼容 OpenAI 的 API 根路径，Go 服务会分别追加 `/embeddings` 与 `/chat/completions`。模型密钥只交给 API 容器，不进入浏览器或仓库。配置嵌入模型后重启会自动补齐缺失向量，也可由教师手动重建。`.env` 已被 Git 与 Docker 构建上下文排除。可按需修改 `WEB_PORT`（默认 8080）和 `MAX_UPLOAD_BYTES`（默认 10485760）。
 
 ```sh
 docker compose up --build -d
@@ -44,6 +44,8 @@ python3 scripts/verify_flow.py
 ```
 
 脚本需要可用的嵌入与对话网关，仅输出状态码、材料 ID 和列表数量，不打印密码或会话 Cookie。它验证教师上传、三种检索、可追溯出处、问答、无依据、教师重建、A/B 隔离、匿名 401、学生上传 403 与不支持扩展名 400。服务端还对空文件、非法 UTF-8 返回 400，对超限文件返回 413；数据库和磁盘写入失败时回滚记录并清理文件。可用 `scripts/mock_gateway.py` 在隔离测试环境模拟兼容 OpenAI 的接口；该脚本只验证链路，不提供真实语义检索能力。
+
+仅使用关键词时，可在没有网关参数的环境运行 `python3 scripts/verify_keyword_only.py`；它验证默认关键词、上传、重建、跨班隔离，以及向量/问答明确返回 503。
 
 遇到启动问题先执行 `docker compose ps` 与 `docker compose logs --tail=100 api db web`。缺少必需环境变量会在 Compose 配置或 API 启动时失败；错误只指明变量名。若端口已被占用，在 `.env` 调整 `WEB_PORT`。数据库与上传文件都使用具名卷，不要用容器内临时目录替代。
 

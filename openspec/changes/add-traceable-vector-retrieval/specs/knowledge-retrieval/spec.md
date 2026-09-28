@@ -6,8 +6,12 @@
 系统 SHALL 为已登录师生提供本班 `keyword`、`vector` 和 `hybrid` 三种检索模式，默认 `hybrid`。班级 MUST 仅取自服务端会话；客户端班级或角色声明 MUST NOT 改变检索范围。无候选时 SHALL 返回空 `hits` 与「资料中未找到相关内容」。
 
 #### Scenario: Keyword search
-- **WHEN** 用户在 keyword 模式检索本班已就绪切片
+- **WHEN** 用户在 keyword 模式检索本班已保存切片（包括向量生成失败的切片）
 - **THEN** 仅使用 MySQL ngram 全文索引，且不调用嵌入网关或 Qdrant
+
+#### Scenario: Embedding gateway not configured yet
+- **WHEN** 服务端尚未配置嵌入模型
+- **THEN** 材料仍切分并保存于 MySQL，关键词检索可用且为默认模式；向量、混合检索与问答明确返回 503，不伪装成语义检索
 
 #### Scenario: Vector and hybrid search
 - **WHEN** 用户在 vector 或 hybrid 模式检索

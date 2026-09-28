@@ -32,6 +32,14 @@ type Config struct {
 	QdrantCollection      string
 }
 
+func (cfg Config) VectorEnabled() bool {
+	return cfg.EmbeddingBaseURL != "" && cfg.EmbeddingModel != ""
+}
+
+func (cfg Config) AnswerEnabled() bool {
+	return cfg.VectorEnabled() && cfg.ChatBaseURL != "" && cfg.ChatModel != ""
+}
+
 func Load() (Config, error) {
 	var cfg Config
 	var err error

@@ -19,11 +19,11 @@ try {
   assert.match(student, /A 班/)
   assert.match(student, /本班知识库检索/)
   assert.match(teacher, /本班知识库检索/)
-  assert.match(student, /混合（默认）/)
-  assert.match(student, /简短回答/)
+  assert.match(student, /关键词（当前可用）/)
+  assert.doesNotMatch(student, /简短回答|<option value="vector"|混合（默认）/)
   assert.doesNotMatch(student, /按当前策略重建索引/)
   assert.match(teacher, /切分策略/)
-  console.log('Both roles can search and ask; only teachers can upload and choose chunking')
+  console.log('Keyword-only mode is usable; only teachers can upload and choose chunking')
 } finally {
   await rm(directory, { recursive: true, force: true })
 }

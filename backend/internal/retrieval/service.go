@@ -32,20 +32,37 @@ type Hit struct {
 }
 
 type Service struct {
-	database *sql.DB
-	auth     *auth.Service
-	embedder Embedder
-	vectors  VectorStore
-	answerer Answerer
+	database      *sql.DB
+	auth          *auth.Service
+	embedder      Embedder
+	vectors       VectorStore
+	answerer      Answerer
+	vectorEnabled bool
+	answerEnabled bool
 }
 
-func New(database *sql.DB, authentication *auth.Service, embedder Embedder, vectors VectorStore, answerer Answerer) *Service {
-	return &Service{database: database, auth: authentication, embedder: embedder, vectors: vectors, answerer: answerer}
+func New(database *sql.DB, authentication *auth.Service, embedder Embedder, vectors VectorStore, answerer Answerer, vectorEnabled, answerEnabled bool) *Service {
+	return &Service{database: database, auth: authentication, embedder: embedder, vectors: vectors, answerer: answerer, vectorEnabled: vectorEnabled, answerEnabled: answerEnabled}
 }
 
 func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/retrieval", s.Search)
+	mux.HandleFunc("GET /api/retrieval/capabilities", s.Capabilities)
 	mux.HandleFunc("POST /api/ask", s.Ask)
+}
+
+func (s *Service) Capabilities(w http.ResponseWriter, r *http.Request) {
+	if _, _, status := s.auth.Current(r); status != 0 {
+		writeStatus(w, status)
+		return
+	}
+	defaultMode := "keyword"
+	if s.vectorEnabled {
+		defaultMode = "hybrid"
+	}
+	auth.WriteJSON(w, http.StatusOK, map[string]any{
+		"vector_enabled": s.vectorEnabled, "answer_enabled": s.answerEnabled, "default_mode": defaultMode,
+	})
 }
 
 func (s *Service) Search(w http.ResponseWriter, r *http.Request) {
@@ -57,10 +74,17 @@ func (s *Service) Search(w http.ResponseWriter, r *http.Request) {
 	term := strings.TrimSpace(r.URL.Query().Get("q"))
 	mode := r.URL.Query().Get("mode")
 	if mode == "" {
-		mode = "hybrid"
+		mode = "keyword"
+		if s.vectorEnabled {
+			mode = "hybrid"
+		}
 	}
 	if !validQuery(term) || !validMode(mode) {
 		auth.WriteError(w, http.StatusBadRequest, "invalid retrieval query or mode")
+		return
+	}
+	if mode != "keyword" && !s.vectorEnabled {
+		writeStatus(w, http.StatusServiceUnavailable)
 		return
 	}
 	hits, err := s.search(r.Context(), identity.ClassID, term, mode, maxHits)
@@ -83,6 +107,10 @@ func (s *Service) Ask(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.auth.ValidCSRF(r, token) {
 		auth.WriteError(w, http.StatusForbidden, "invalid csrf token")
+		return
+	}
+	if !s.answerEnabled {
+		writeStatus(w, http.StatusServiceUnavailable)
 		return
 	}
 	var input struct {
@@ -152,7 +180,7 @@ func (s *Service) keyword(ctx context.Context, classID int64, term string, limit
 		c.start_offset, c.end_offset, c.chunk_text,
 		MATCH(c.chunk_text) AGAINST (? IN NATURAL LANGUAGE MODE) AS relevance
 		FROM knowledge_chunks c JOIN materials m ON m.id = c.material_id AND m.class_id = c.class_id
-		WHERE c.class_id = ? AND c.index_status = 'ready'
+		WHERE c.class_id = ? AND c.index_status IN ('ready', 'failed')
 		AND MATCH(c.chunk_text) AGAINST (? IN NATURAL LANGUAGE MODE) > 0
 		ORDER BY relevance DESC, c.id ASC LIMIT ?`, term, classID, term, limit)
 	if err != nil {

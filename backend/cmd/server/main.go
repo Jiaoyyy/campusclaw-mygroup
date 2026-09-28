@@ -44,12 +44,12 @@ func main() {
 	mux := http.NewServeMux()
 	embedder := retrieval.NewEmbedder(cfg)
 	vectors := retrieval.NewVectorStore(cfg)
-	indexer := retrieval.NewIndexer(database, embedder, vectors)
+	indexer := retrieval.NewIndexer(database, embedder, vectors, cfg.VectorEnabled())
 	mux.HandleFunc("/api/login", authService.Login)
 	mux.HandleFunc("/api/logout", authService.Logout)
 	mux.HandleFunc("/api/me", authService.Me)
 	materials.New(database, cfg, authService).WithIndexer(indexer).Register(mux)
-	retrieval.New(database, authService, embedder, vectors, retrieval.NewAnswerer(cfg)).Register(mux)
+	retrieval.New(database, authService, embedder, vectors, retrieval.NewAnswerer(cfg), cfg.VectorEnabled(), cfg.AnswerEnabled()).Register(mux)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		auth.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -63,7 +63,7 @@ func main() {
 			if err != nil || failed > 0 {
 				log.Printf("index backfill: %d materials need retry", failed)
 			}
-			if cfg.EmbeddingBaseURL == "" || cfg.EmbeddingModel == "" {
+			if !cfg.VectorEnabled() {
 				return // Restart with gateway configuration to retry failed chunks.
 			}
 			time.Sleep(2 * time.Minute)

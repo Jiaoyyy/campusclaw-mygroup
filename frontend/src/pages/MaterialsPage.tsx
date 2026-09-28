@@ -8,7 +8,9 @@ export default function MaterialsPage({ profile, onAuthLost }: { profile: Profil
   const [search, setSearch] = useState('')
   const [appliedSearch, setAppliedSearch] = useState('')
   const [retrievalQuery, setRetrievalQuery] = useState('')
-  const [retrievalMode, setRetrievalMode] = useState<'keyword' | 'vector' | 'hybrid'>('hybrid')
+  const [retrievalMode, setRetrievalMode] = useState<'keyword' | 'vector' | 'hybrid'>('keyword')
+  const [vectorEnabled, setVectorEnabled] = useState(false)
+  const [answerEnabled, setAnswerEnabled] = useState(false)
   const [retrievalHits, setRetrievalHits] = useState<RetrievalHit[]>([])
   const [retrievalDone, setRetrievalDone] = useState(false)
   const [retrievalBusy, setRetrievalBusy] = useState(false)
@@ -48,6 +50,15 @@ export default function MaterialsPage({ profile, onAuthLost }: { profile: Profil
   }, [handleError])
 
   useEffect(() => { void refresh(appliedSearch) }, [appliedSearch, refresh])
+  useEffect(() => {
+    void api<{ vector_enabled: boolean, answer_enabled: boolean, default_mode: 'keyword' | 'hybrid' }>('/api/retrieval/capabilities')
+      .then((result) => {
+        setVectorEnabled(result.vector_enabled)
+        setAnswerEnabled(result.answer_enabled)
+        setRetrievalMode(result.default_mode)
+      })
+      .catch(handleError)
+  }, [handleError])
 
   async function openMaterial(id: number, scrollToDetail = false) {
     try {
@@ -111,7 +122,7 @@ export default function MaterialsPage({ profile, onAuthLost }: { profile: Profil
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': profile.csrf_token },
         body: JSON.stringify(chunkOptions()),
       })
-      setNotice('索引已按当前策略重建。')
+      setNotice(vectorEnabled ? '索引已按当前策略重建。' : '切片已重建，关键词检索可用。')
       await refresh(appliedSearch)
       await openMaterial(selected.id)
     } catch (cause) { handleError(cause) } finally { setReindexBusy(false) }
@@ -135,7 +146,7 @@ export default function MaterialsPage({ profile, onAuthLost }: { profile: Profil
       setFile(null)
       const input = document.getElementById('material-file') as HTMLInputElement | null
       if (input) input.value = ''
-      setNotice(result.index_status === 'ready' ? `上传成功，材料 #${result.id} 已完成索引。` : `上传成功，材料 #${result.id} 已保存；索引暂未就绪，请检查模型配置后重建。`)
+      setNotice(result.index_status === 'ready' ? `上传成功，材料 #${result.id} 已完成索引。` : !vectorEnabled ? `上传成功，材料 #${result.id} 可用关键词检索；向量索引待配置。` : `上传成功，材料 #${result.id} 已保存；向量索引暂未就绪。`)
       await refresh(appliedSearch)
       await openMaterial(result.id)
     } catch (cause) {
@@ -165,12 +176,12 @@ export default function MaterialsPage({ profile, onAuthLost }: { profile: Profil
         {error && <p className="alert" role="alert">{error}</p>}
         {notice && <p className="success" role="status">{notice}</p>}
         <section className="panel retrieval-panel" aria-labelledby="retrieval-title">
-          <div className="panel-heading"><div><h2 id="retrieval-title">本班知识库检索</h2><p className="muted">选择检索模式，查找本班切片；每条结果都能追溯到原文件。</p></div></div>
+          <div className="panel-heading"><div><h2 id="retrieval-title">本班知识库检索</h2><p className="muted">{vectorEnabled ? '选择检索模式，查找本班切片；每条结果都能追溯到原文件。' : '当前使用关键词检索；配置嵌入模型后可开启向量与混合检索。'}</p></div></div>
           <form className="retrieval-form" onSubmit={(event) => void retrieve(event)}>
             <input aria-label="检索本班材料正文" placeholder="例如：认证规则是什么？" value={retrievalQuery} onChange={(event) => setRetrievalQuery(event.target.value)} maxLength={100} required />
-            <select aria-label="检索模式" value={retrievalMode} onChange={(event) => setRetrievalMode(event.target.value as typeof retrievalMode)}><option value="hybrid">混合（默认）</option><option value="keyword">关键词</option><option value="vector">向量</option></select>
+            <select aria-label="检索模式" value={retrievalMode} onChange={(event) => setRetrievalMode(event.target.value as typeof retrievalMode)}><option value="keyword">关键词{!vectorEnabled ? '（当前可用）' : ''}</option>{vectorEnabled && <><option value="hybrid">混合（默认）</option><option value="vector">向量</option></>}</select>
             <button type="submit" disabled={retrievalBusy}>{retrievalBusy ? '检索中…' : '检索'}</button>
-            <button type="button" disabled={asking} onClick={() => void ask()}>{asking ? '回答中…' : '简短回答'}</button>
+            {answerEnabled && <button type="button" disabled={asking} onClick={() => void ask()}>{asking ? '回答中…' : '简短回答'}</button>}
           </form>
           {retrievalDone && (retrievalHits.length === 0 ? <p className="retrieval-empty" role="status">资料中未找到相关内容。</p> : <ul className="retrieval-results">{retrievalHits.map((hit) => <li key={hit.chunk_id}><button type="button" onClick={() => void openMaterial(hit.material_id, true)}><strong>{hit.title}</strong><span>第 {hit.chunk_index} 段 · 字符 {hit.start_offset + 1}–{hit.end_offset} · 查看原文 →</span><small>{hit.snippet}</small></button></li>)}</ul>)}
           {answer && <div className="answer-panel"><h3>依据本班材料的回答</h3><p>{answer}</p>{citations.length > 0 && <ol>{citations.map((hit) => <li key={hit.chunk_id}><button type="button" onClick={() => void openMaterial(hit.material_id, true)}>[{citations.indexOf(hit) + 1}] {hit.title} · 第 {hit.chunk_index} 段</button></li>)}</ol>}</div>}
@@ -178,11 +189,11 @@ export default function MaterialsPage({ profile, onAuthLost }: { profile: Profil
         <div className="content-grid">
           <section className="panel" aria-labelledby="materials-title">
             <div className="panel-heading"><h2 id="materials-title">材料列表</h2><form className="search" onSubmit={(event) => { event.preventDefault(); setAppliedSearch(search) }}><input aria-label="按文件名筛选" placeholder="按文件名筛选" value={search} onChange={(event) => setSearch(event.target.value)} /><button type="submit">筛选</button></form></div>
-            {items.length === 0 ? <div className="empty-state">本班暂无符合条件的材料。</div> : <ul className="material-list">{items.map((item) => <li key={item.id}><button className={selected?.id === item.id ? 'material-row active' : 'material-row'} onClick={() => void openMaterial(item.id)}><span className="file-icon">{item.original_filename.toLowerCase().endsWith('.md') ? 'MD' : 'TXT'}</span><span className="file-info"><strong>{item.original_filename}</strong><small>{item.uploader} · {new Date(item.created_at).toLocaleString('zh-CN')} · 索引{item.index_status === 'ready' ? '就绪' : item.index_status === 'failed' ? '失败' : '处理中'}</small></span><span className="arrow">→</span></button></li>)}</ul>}
+            {items.length === 0 ? <div className="empty-state">本班暂无符合条件的材料。</div> : <ul className="material-list">{items.map((item) => <li key={item.id}><button className={selected?.id === item.id ? 'material-row active' : 'material-row'} onClick={() => void openMaterial(item.id)}><span className="file-icon">{item.original_filename.toLowerCase().endsWith('.md') ? 'MD' : 'TXT'}</span><span className="file-info"><strong>{item.original_filename}</strong><small>{item.uploader} · {new Date(item.created_at).toLocaleString('zh-CN')} · {item.index_status === 'ready' ? '索引就绪' : !vectorEnabled ? '关键词可用' : item.index_status === 'failed' ? '向量索引失败' : '索引处理中'}</small></span><span className="arrow">→</span></button></li>)}</ul>}
           </section>
           <div className="side-column">
             {profile.role === 'teacher' && <section className="panel upload-panel" aria-labelledby="upload-title"><h2 id="upload-title">上传材料与切分策略</h2><p className="muted">支持 UTF-8 .txt / .md；索引就绪后本班师生可检索。</p><form onSubmit={(event) => void upload(event)}><label className="file-picker" htmlFor="material-file">{file ? file.name : '选择 TXT 或 Markdown 文件'}</label><input id="material-file" type="file" accept=".txt,.md" onChange={(event) => setFile(event.target.files?.[0] ?? null)} required /><label>切分策略 <select value={strategy} onChange={(event) => setStrategy(event.target.value as typeof strategy)}><option value="auto">自动窗口</option><option value="custom">自定义分隔符</option><option value="hierarchy">Markdown 标题</option></select></label>{strategy === 'custom' && <div className="chunk-settings"><label>最大字符数 <input type="number" min="100" max="2000" value={maxChars} onChange={(event) => setMaxChars(Number(event.target.value))} /></label><label>重叠比例（%） <input type="number" min="0" max="50" value={overlapPercent} onChange={(event) => setOverlapPercent(Number(event.target.value))} /></label><label>分隔符 <select value={separator} onChange={(event) => setSeparator(event.target.value as typeof separator)}><option value="newline">换行</option><option value="blankline">空行</option><option value="period">句号</option></select></label><label><input type="checkbox" checked={removeURLs} onChange={(event) => setRemoveURLs(event.target.checked)} /> 移除 URL</label><label><input type="checkbox" checked={removeEmails} onChange={(event) => setRemoveEmails(event.target.checked)} /> 移除邮箱</label><label><input type="checkbox" checked={collapseWhitespace} onChange={(event) => setCollapseWhitespace(event.target.checked)} /> 合并空白</label></div>}<button className="primary-button" type="submit" disabled={busy || !file}>{busy ? '正在上传…' : '上传到本班'}</button></form></section>}
-            <section ref={detailRef} className="panel detail-panel" aria-labelledby="detail-title"><div className="panel-heading"><h2 id="detail-title">材料详情</h2>{selected && <a className="download-link" href={`/api/materials/${selected.id}/file`}>下载原文件 ↗</a>}</div>{selected ? <><h3>{selected.original_filename}</h3><p className="detail-meta">{selected.uploader} · {new Date(selected.created_at).toLocaleString('zh-CN')} · {(selected.size_bytes / 1024).toFixed(1)} KB · 索引{selected.index_status === 'ready' ? '就绪' : selected.index_status === 'failed' ? '失败' : '处理中'}</p>{profile.role === 'teacher' && <button className="reindex-button" type="button" disabled={reindexBusy} onClick={() => void reindex()}>{reindexBusy ? '重建中…' : '按当前策略重建索引'}</button>}<div className="document-body">{selected.original_filename.toLowerCase().endsWith('.md') ? <ReactMarkdown skipHtml>{selected.body}</ReactMarkdown> : <pre>{selected.body}</pre>}</div></> : <div className="empty-state">选择左侧材料后查看正文。</div>}</section>
+            <section ref={detailRef} className="panel detail-panel" aria-labelledby="detail-title"><div className="panel-heading"><h2 id="detail-title">材料详情</h2>{selected && <a className="download-link" href={`/api/materials/${selected.id}/file`}>下载原文件 ↗</a>}</div>{selected ? <><h3>{selected.original_filename}</h3><p className="detail-meta">{selected.uploader} · {new Date(selected.created_at).toLocaleString('zh-CN')} · {(selected.size_bytes / 1024).toFixed(1)} KB · {selected.index_status === 'ready' ? '索引就绪' : !vectorEnabled ? '关键词可用' : selected.index_status === 'failed' ? '向量索引失败' : '索引处理中'}</p>{profile.role === 'teacher' && <button className="reindex-button" type="button" disabled={reindexBusy} onClick={() => void reindex()}>{reindexBusy ? '重建中…' : '按当前策略重建索引'}</button>}<div className="document-body">{selected.original_filename.toLowerCase().endsWith('.md') ? <ReactMarkdown skipHtml>{selected.body}</ReactMarkdown> : <pre>{selected.body}</pre>}</div></> : <div className="empty-state">选择左侧材料后查看正文。</div>}</section>
           </div>
         </div>
       </main>

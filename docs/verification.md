@@ -82,3 +82,9 @@
 - 将隔离数据库中的一条 custom 切片标为 failed 再重启 API，后台重试将同一切片 ID `8` 从 failed 改为 ready，`strategy=custom` 保持不变；已有种子材料在启动时自动补建切片。
 
 真实课程网关的地址、模型名和密钥尚待本地配置，因此真实语义相关性和实际模型回答仍需配置后复验。密钥只放在本地 `.env`，不进入提交。
+
+## 暂不配置嵌入模型时的关键词模式（2026-09-28）
+
+用户选择先不接入嵌入模型。隔离的 `cc-week04-check` Compose 环境不提供任何模型网关参数，运行 `scripts/verify_keyword_only.py` 通过：能力接口给出 `default_mode=keyword`、`vector_enabled=false`、`answer_enabled=false`；教师上传材料 `5` 后 MySQL 切片可被 A 班关键词检索，B 班不见该材料；教师使用 hierarchy 重建后仍能检索。向量与混合检索以及问答均返回 503，页面不展示不可用的模式或问答按钮。此模式尚未完成第 4 课要求的向量和 RAG 能力；补充嵌入网关后仍需真实模型复验。
+
+保留原有数据库和上传卷，对本地 `18082` 应用执行 `docker compose up --build -d`。升级后 `/health` 为 200、能力接口默认 keyword，A 班原有 3 份材料仍在；从其中一份原文取词检索，返回该材料的命中，说明旧数据补建成功。
