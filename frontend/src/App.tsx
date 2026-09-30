@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, ApiError, messageFor, type Profile } from './api'
+import { api, ApiError, clearToken, getToken, messageFor, type Profile } from './api'
 import LoginPage from './pages/LoginPage'
 import MaterialsPage from './pages/MaterialsPage'
 import './styles.css'
@@ -12,6 +12,12 @@ export default function App() {
   const checkSession = useCallback(() => {
     setStartupError('')
     setLoading(true)
+    if (!getToken()) {
+      setProfile(null)
+      window.history.replaceState(null, '', '/login')
+      setLoading(false)
+      return
+    }
     api<Profile>('/api/me')
       .then((current) => {
         setProfile(current)
@@ -19,6 +25,8 @@ export default function App() {
       })
       .catch((error: unknown) => {
         if (error instanceof ApiError && error.status === 401) {
+          clearToken()
+          setProfile(null)
           window.history.replaceState(null, '', '/login')
         } else {
           setStartupError(messageFor(error))
@@ -40,6 +48,7 @@ export default function App() {
   }
 
   return <MaterialsPage profile={profile} onAuthLost={() => {
+    clearToken()
     setProfile(null)
     window.history.replaceState(null, '', '/login')
   }} />

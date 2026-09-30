@@ -36,13 +36,53 @@ export class ApiError extends Error {
   }
 }
 
+const tokenKey = 'campusclaw_access_token'
+
+export function getToken(): string | null {
+  return sessionStorage.getItem(tokenKey)
+}
+
+export function setToken(token: string): void {
+  sessionStorage.setItem(tokenKey, token)
+}
+
+export function clearToken(): void {
+  sessionStorage.removeItem(tokenKey)
+}
+
+function requestInit(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers)
+  const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  return { ...init, credentials: 'omit', cache: 'no-store', headers }
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { credentials: 'same-origin', ...init })
+  const response = await fetch(path, requestInit(init))
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new ApiError(response.status, typeof payload.error === 'string' ? payload.error : '请求失败，请稍后重试。')
   }
   return payload as T
+}
+
+export async function downloadMaterial(id: number, filename: string): Promise<void> {
+  const response = await fetch(`/api/materials/${id}/file`, requestInit())
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    throw new ApiError(response.status, typeof payload.error === 'string' ? payload.error : '下载失败')
+  }
+  const objectURL = URL.createObjectURL(await response.blob())
+  try {
+    const link = document.createElement('a')
+    link.href = objectURL
+    link.download = filename
+    document.body.append(link)
+    link.click()
+    link.remove()
+  } finally {
+    URL.revokeObjectURL(objectURL)
+  }
 }
 
 export function messageFor(error: unknown): string {

@@ -32,6 +32,12 @@ curl http://localhost:8080/health
 
 登录后 `GET /api/me` 返回服务端读取的角色、班级和 CSRF 凭据。`POST /api/materials` 使用 `multipart/form-data` 的 `file` 字段和 `X-CSRF-Token` 请求头。浏览器页面会自动处理这两项。原文件只挂载到 API 容器，必须经 `/api/materials/{id}/file` 鉴权下载；`/uploads/...` 不公开。
 
+## 09/30 课堂任务：token 登录认证
+
+浏览器现使用 `POST /api/login?mode=token`。登录成功返回随机 `access_token`、`token_type: Bearer` 和到期时间，不设置登录 Cookie；前端将 token 保存在当前标签页的 `sessionStorage`，后续请求（含原文件下载）都带 `Authorization: Bearer <token>`。服务端数据库只保存 token 的带密钥哈希，每次请求仍从会话和用户表读取角色与班级。登出会立即删除会话；伪造、过期或已登出的 token 返回 401。原有 Cookie 客户端继续兼容，但课堂演示的浏览器走 Bearer 链路。它是随机不透明 token，课程和作业截图未要求 JWT。
+
+打开浏览器开发者工具的「网络」页，登录后点开 `/api/me`：请求头应有 `Authorization: Bearer …`、响应状态为 200，页面显示账号与班级。登出后再次用旧 token 请求 `/api/me` 应返回 401。**提交截图时遮住 token 原文和任何口令**。在 `.env` 准备好预置账号密码后，自动验证可运行 `python3 scripts/verify_token_auth.py`；脚本只输出状态码，不打印 token。
+
 ## 验收与排查
 
 设置好 `.env` 后，可以运行完整成功与失败路径：

@@ -107,8 +107,8 @@ func (s *Service) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	if previous, err := r.Cookie(cookieName); err == nil && previous.Value != "" {
-		if _, err := tx.ExecContext(r.Context(), "DELETE FROM sessions WHERE token_hash = ?", s.sessionHash(previous.Value)); err != nil {
+	if previous, ok := requestToken(r); ok {
+		if _, err := tx.ExecContext(r.Context(), "DELETE FROM sessions WHERE token_hash = ?", s.sessionHash(previous)); err != nil {
 			WriteError(w, http.StatusServiceUnavailable, "service unavailable")
 			return
 		}
@@ -123,6 +123,10 @@ func (s *Service) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.clear(key)
+	if r.URL.Query().Get("mode") == "token" {
+		WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "access_token": token, "token_type": "Bearer", "expires_at": expires})
+		return
+	}
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secureCookie(r), Expires: expires, MaxAge: int(s.cfg.SessionTTL.Seconds())})
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -146,7 +150,9 @@ func (s *Service) Logout(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secureCookie(r), MaxAge: -1})
+	if r.Header.Get("Authorization") == "" {
+		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secureCookie(r), MaxAge: -1})
+	}
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -167,14 +173,14 @@ func (s *Service) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) Current(r *http.Request) (Identity, string, int) {
-	cookie, err := r.Cookie(cookieName)
-	if err != nil || cookie.Value == "" {
+	token, ok := requestToken(r)
+	if !ok {
 		return Identity{}, "", http.StatusUnauthorized
 	}
 	var identity Identity
-	err = s.database.QueryRowContext(r.Context(), `SELECT u.id, u.username, u.role, u.class_id, c.name
+	err := s.database.QueryRowContext(r.Context(), `SELECT u.id, u.username, u.role, u.class_id, c.name
 		FROM sessions s JOIN users u ON u.id = s.user_id JOIN classes c ON c.id = u.class_id
-		WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP(6)`, s.sessionHash(cookie.Value)).Scan(
+		WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP(6)`, s.sessionHash(token)).Scan(
 		&identity.ID, &identity.Username, &identity.Role, &identity.ClassID, &identity.ClassName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Identity{}, "", http.StatusUnauthorized
@@ -185,7 +191,27 @@ func (s *Service) Current(r *http.Request) (Identity, string, int) {
 	if identity.ClassID <= 0 || (identity.Role != "teacher" && identity.Role != "student") {
 		return Identity{}, "", http.StatusUnauthorized
 	}
-	return identity, cookie.Value, 0
+	return identity, token, 0
+}
+
+// A bearer token takes precedence over a cookie. A malformed Authorization
+// header must never fall back to another ambient login state.
+func requestToken(r *http.Request) (string, bool) {
+	if header := r.Header.Get("Authorization"); header != "" {
+		parts := strings.Fields(header)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || len(parts[1]) != 64 {
+			return "", false
+		}
+		if _, err := hex.DecodeString(parts[1]); err != nil {
+			return "", false
+		}
+		return parts[1], true
+	}
+	cookie, err := r.Cookie(cookieName)
+	if err != nil || cookie.Value == "" {
+		return "", false
+	}
+	return cookie.Value, true
 }
 
 func (s *Service) ValidCSRF(r *http.Request, sessionToken string) bool {

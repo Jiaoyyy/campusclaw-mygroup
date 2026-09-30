@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { api, messageFor, type Profile } from '../api'
+import { api, clearToken, messageFor, setToken, type Profile } from '../api'
 
 export default function LoginPage({ onLogin }: { onLogin: (profile: Profile) => void }) {
   const [username, setUsername] = useState('')
@@ -12,13 +12,16 @@ export default function LoginPage({ onLogin }: { onLogin: (profile: Profile) => 
     setBusy(true)
     setError('')
     try {
-      await api<{ status: string }>('/api/login', {
+      const login = await api<{ status: string, access_token: string, token_type: string }>('/api/login?mode=token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       })
+      if (login.token_type !== 'Bearer' || !login.access_token) throw new Error('missing bearer token')
+      setToken(login.access_token)
       onLogin(await api<Profile>('/api/me'))
     } catch (cause) {
+      clearToken()
       setError(messageFor(cause))
     } finally {
       setBusy(false)

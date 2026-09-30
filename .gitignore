@@ -6,3 +6,5 @@ node_modules/
 dist/
 .DS_Store
 .agents/
+# Local classroom submission evidence may include user-specific material names.
+docs/0930-token-login.png

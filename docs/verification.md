@@ -88,3 +88,9 @@
 用户选择先不接入嵌入模型。隔离的 `cc-week04-check` Compose 环境不提供任何模型网关参数，运行 `scripts/verify_keyword_only.py` 通过：能力接口给出 `default_mode=keyword`、`vector_enabled=false`、`answer_enabled=false`；教师上传材料 `5` 后 MySQL 切片可被 A 班关键词检索，B 班不见该材料；教师使用 hierarchy 重建后仍能检索。向量与混合检索以及问答均返回 503，页面不展示不可用的模式或问答按钮。此模式尚未完成第 4 课要求的向量和 RAG 能力；补充嵌入网关后仍需真实模型复验。
 
 保留原有数据库和上传卷，对本地 `18082` 应用执行 `docker compose up --build -d`。升级后 `/health` 为 200、能力接口默认 keyword，A 班原有 3 份材料仍在；从其中一份原文取词检索，返回该材料的命中，说明旧数据补建成功。
+
+## 09/30 Bearer token 课堂任务（2026-09-30）
+
+公开[第 3 课认证方案页](https://devops.hello1023.com/课件/第3课-课件-认证授权与知识库入库/pages/auth-schemes.html)采用 Cookie 服务端会话，并说明当课不采用 JWT；09/30 作业截图另要求 token 登录认证，未指定 JWT。实现以现有 256 位随机会话标识增加 Bearer 传输，浏览器新登录不设置 Cookie。
+
+独立的 `cc-token-check` Compose 环境在端口 `18085` 运行 `scripts/verify_token_auth.py`：token 登录 200 且无 Set-Cookie；带 Bearer 头的 `/api/me` 和原文件下载均为 200；匿名与伪造 token 为 401，B 班访问 A 班材料为 404；登出后旧 token 为 401。旧 Cookie 客户端的 `scripts/verify_keyword_only.py` 仍通过。Go 单元测试检查 Bearer 优先于 Cookie，格式错误时不回退。随后保留原卷更新本地 `18082` 应用，同一 token 验收脚本通过。真实 Chrome 从登录表单进入 `18082` 的材料页，CDP 观察 `/api/me` 带 Bearer 请求头且返回 200；不含凭据的本地效果截图保存在 `docs/0930-token-login.png`，供用户自行提交课堂作业，不纳入公开仓库。
