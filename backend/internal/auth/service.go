@@ -19,8 +19,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const cookieName = "campusclaw_session"
-
 type Identity struct {
 	ID        int64  `json:"id"`
 	Username  string `json:"username"`
@@ -123,12 +121,7 @@ func (s *Service) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.clear(key)
-	if r.URL.Query().Get("mode") == "token" {
-		WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "access_token": token, "token_type": "Bearer", "expires_at": expires})
-		return
-	}
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secureCookie(r), Expires: expires, MaxAge: int(s.cfg.SessionTTL.Seconds())})
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "access_token": token, "token_type": "Bearer", "expires_at": expires})
 }
 
 func (s *Service) Logout(w http.ResponseWriter, r *http.Request) {
@@ -149,9 +142,6 @@ func (s *Service) Logout(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.database.ExecContext(r.Context(), "DELETE FROM sessions WHERE token_hash = ?", s.sessionHash(token)); err != nil {
 		WriteError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
-	}
-	if r.Header.Get("Authorization") == "" {
-		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secureCookie(r), MaxAge: -1})
 	}
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -194,24 +184,16 @@ func (s *Service) Current(r *http.Request) (Identity, string, int) {
 	return identity, token, 0
 }
 
-// A bearer token takes precedence over a cookie. A malformed Authorization
-// header must never fall back to another ambient login state.
+// Protected requests require an explicit bearer token.
 func requestToken(r *http.Request) (string, bool) {
-	if header := r.Header.Get("Authorization"); header != "" {
-		parts := strings.Fields(header)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || len(parts[1]) != 64 {
-			return "", false
-		}
-		if _, err := hex.DecodeString(parts[1]); err != nil {
-			return "", false
-		}
-		return parts[1], true
-	}
-	cookie, err := r.Cookie(cookieName)
-	if err != nil || cookie.Value == "" {
+	parts := strings.Fields(r.Header.Get("Authorization"))
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || len(parts[1]) != 64 {
 		return "", false
 	}
-	return cookie.Value, true
+	if _, err := hex.DecodeString(parts[1]); err != nil {
+		return "", false
+	}
+	return parts[1], true
 }
 
 func (s *Service) ValidCSRF(r *http.Request, sessionToken string) bool {

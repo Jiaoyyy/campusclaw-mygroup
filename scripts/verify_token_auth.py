@@ -14,7 +14,7 @@ def main():
         "password": os.environ["SEED_STUDENT_A1_PASSWORD"],
     }).encode()
     request = urllib.request.Request(
-        BASE + "/api/login?mode=token",
+        BASE + "/api/login",
         data=payload,
         headers={"Content-Type": "application/json", "Origin": BASE},
         method="POST",
@@ -28,6 +28,7 @@ def main():
     bearer = {"Authorization": "Bearer " + token}
 
     assert call(client(), "GET", "/api/me")[0] == 401
+    assert call(client(), "GET", "/api/me", headers={"Cookie": "campusclaw_session=" + token})[0] == 401
     status, body = call(client(), "GET", "/api/me", headers=bearer)
     assert status == 200, (status, body)
     me = json.loads(body)
@@ -43,7 +44,7 @@ def main():
     assert call(client(), "GET", f"/api/materials/{material_id}/file")[0] == 401
 
     b_request = urllib.request.Request(
-        BASE + "/api/login?mode=token",
+        BASE + "/api/login",
         data=json.dumps({"username": "student_b1", "password": os.environ["SEED_STUDENT_B1_PASSWORD"]}).encode(),
         headers={"Content-Type": "application/json", "Origin": BASE}, method="POST",
     )

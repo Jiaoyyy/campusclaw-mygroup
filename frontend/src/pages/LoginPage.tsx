@@ -12,7 +12,7 @@ export default function LoginPage({ onLogin }: { onLogin: (profile: Profile) => 
     setBusy(true)
     setError('')
     try {
-      const login = await api<{ status: string, access_token: string, token_type: string }>('/api/login?mode=token', {
+      const login = await api<{ status: string, access_token: string, token_type: string }>('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),

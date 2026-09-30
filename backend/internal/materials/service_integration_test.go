@@ -53,13 +53,13 @@ func TestClassIsolationAndUpload(t *testing.T) {
 	mux.HandleFunc("/api/me", authentication.Me)
 	service := New(database, cfg, authentication)
 	service.Register(mux)
-	call := func(method, target string, body io.Reader, contentType string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
+	call := func(method, target string, body io.Reader, contentType, token, csrf string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, target, body)
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
 		}
-		if cookie != nil {
-			req.AddCookie(cookie)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
 		}
 		if csrf != "" {
 			req.Header.Set("X-CSRF-Token", csrf)
@@ -68,22 +68,27 @@ func TestClassIsolationAndUpload(t *testing.T) {
 		mux.ServeHTTP(response, req)
 		return response
 	}
-	login := func(username, password string) (*http.Cookie, string) {
+	login := func(username, password string) (string, string) {
 		t.Helper()
 		body := `{"username":"` + username + `","password":"` + password + `"}`
-		response := call(http.MethodPost, "/api/login", strings.NewReader(body), "application/json", nil, "")
+		response := call(http.MethodPost, "/api/login", strings.NewReader(body), "application/json", "", "")
 		if response.Code != http.StatusOK {
 			t.Fatalf("login %s: %d %s", username, response.Code, response.Body.String())
 		}
-		cookie := response.Result().Cookies()[0]
-		me := call(http.MethodGet, "/api/me", nil, "", cookie, "")
+		var loginResult struct {
+			AccessToken string `json:"access_token"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &loginResult); err != nil || loginResult.AccessToken == "" {
+			t.Fatal("missing access token")
+		}
+		me := call(http.MethodGet, "/api/me", nil, "", loginResult.AccessToken, "")
 		var profile struct {
 			CSRFToken string `json:"csrf_token"`
 		}
 		if err := json.Unmarshal(me.Body.Bytes(), &profile); err != nil {
 			t.Fatal(err)
 		}
-		return cookie, profile.CSRFToken
+		return loginResult.AccessToken, profile.CSRFToken
 	}
 	makeUpload := func(filename string, content []byte) (*bytes.Buffer, string) {
 		t.Helper()
@@ -104,9 +109,9 @@ func TestClassIsolationAndUpload(t *testing.T) {
 	teacher, teacherCSRF := login("teacher_a", cfg.SeedTeacherAPassword)
 	aStudent, aCSRF := login("student_a1", cfg.SeedStudentA1Password)
 	bStudent, _ := login("student_b1", cfg.SeedStudentB1Password)
-	list := func(cookie *http.Cookie) []Material {
+	list := func(token string) []Material {
 		t.Helper()
-		response := call(http.MethodGet, "/api/materials", nil, "", cookie, "")
+		response := call(http.MethodGet, "/api/materials", nil, "", token, "")
 		var result struct {
 			Items []Material `json:"items"`
 		}
@@ -141,7 +146,7 @@ func TestClassIsolationAndUpload(t *testing.T) {
 	forged.Header.Set("Content-Type", contentType)
 	forged.Header.Set("X-CSRF-Token", aCSRF)
 	forged.Header.Set("X-Role", "teacher")
-	forged.AddCookie(aStudent)
+	forged.Header.Set("Authorization", "Bearer "+aStudent)
 	forgedResponse := httptest.NewRecorder()
 	mux.ServeHTTP(forgedResponse, forged)
 	if forgedResponse.Code != http.StatusForbidden {

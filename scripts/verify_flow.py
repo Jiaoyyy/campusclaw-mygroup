@@ -1,6 +1,5 @@
 """Exercise the lesson's success and authorization paths against a running web port."""
 
-import http.cookiejar
 import json
 import os
 import urllib.error
@@ -11,14 +10,24 @@ BASE = os.environ.get("VERIFY_BASE_URL", "http://localhost:8080").rstrip("/")
 
 
 def client():
-    return urllib.request.build_opener(
-        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
-    )
+    return urllib.request.build_opener()
+
+
+class AuthenticatedClient:
+    def __init__(self, opener, token):
+        self.opener = opener
+        self.token = token
+
+    def open(self, request, timeout):
+        return self.opener.open(request, timeout=timeout)
 
 
 def call(opener, method, path, data=None, headers=None):
+    headers = dict(headers or {})
+    if isinstance(opener, AuthenticatedClient):
+        headers.setdefault("Authorization", "Bearer " + opener.token)
     request = urllib.request.Request(
-        BASE + path, data=data, headers=headers or {}, method=method
+        BASE + path, data=data, headers=headers, method=method
     )
     try:
         with opener.open(request, timeout=10) as response:
@@ -29,7 +38,7 @@ def call(opener, method, path, data=None, headers=None):
 
 def login(username, password):
     opener = client()
-    status, _ = call(
+    status, body = call(
         opener,
         "POST",
         "/api/login",
@@ -37,6 +46,8 @@ def login(username, password):
         {"Content-Type": "application/json", "Origin": BASE},
     )
     assert status == 200, (username, status)
+    token = json.loads(body)["access_token"]
+    opener = AuthenticatedClient(opener, token)
     status, body = call(opener, "GET", "/api/me")
     assert status == 200, (username, status)
     return opener, json.loads(body)
