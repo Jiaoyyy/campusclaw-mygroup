@@ -94,3 +94,9 @@
 公开[第 3 课认证方案页](https://devops.hello1023.com/课件/第3课-课件-认证授权与知识库入库/pages/auth-schemes.html)采用 Cookie 服务端会话，并说明当课不采用 JWT；09/30 作业截图另要求 token 登录认证，未指定 JWT。实现以现有 256 位随机会话标识增加 Bearer 传输，浏览器新登录不设置 Cookie。
 
 独立的 `cc-token-check` Compose 环境在端口 `18085` 运行 `scripts/verify_token_auth.py`：token 登录 200 且无 Set-Cookie；带 Bearer 头的 `/api/me` 和原文件下载均为 200；匿名与伪造 token 为 401，B 班访问 A 班材料为 404；登出后旧 token 为 401。随后按老师要求移除服务端 Cookie 兼容：普通登录只签发 Bearer token，Cookie 单独请求返回 401。`scripts/verify_flow.py` 与 `scripts/verify_keyword_only.py` 已改用 Bearer。在保留原卷更新的本地 `18082` 应用上，`scripts/verify_token_auth.py` 再次通过，包括 Cookie 单独请求 401。Go 单元测试、前端构建与 OpenSpec 严格校验通过。真实 Chrome 从登录表单进入 `18082` 的材料页，CDP 观察 `/api/me` 带 Bearer 请求头且返回 200；不含凭据的本地效果截图保存在 `docs/0930-token-login.png`，供用户自行提交课堂作业，不纳入公开仓库。
+
+## 课程网关真实嵌入验收（2026-09-30）
+
+用户提供 `https://ai-gateway.devops.hello1023.com/v1`、`course-embedding`，并在本地 Git 忽略的 `.env` 填入本人网关密钥；密钥未进入仓库、日志或测试输出。用户明确同意将现有 A、B 班材料切片发送至该课程网关。对公开测试词 `hello` 的 `/embeddings` 请求返回 200 和 2048 维向量。保留 MySQL、上传及 Qdrant 原卷重启 API 后，A 班 3 份、B 班 1 份材料均由 `failed` 转为 `ready`，Qdrant 集合包含 4 个 2048 维 Cosine 点。
+
+`scripts/verify_vector_only.py` 用非材料原文的普通问题验证：能力接口为 `vector_enabled=true`、`default_mode=hybrid`、`answer_enabled=false`；A 班关键词、向量、混合分别返回 1、2、2 条，B 班的混合结果均属于 B 班，匿名向量请求为 401。该验收只证明当前网关、数据和权限链路可用；对话模型尚未配置，简短回答仍不可用。

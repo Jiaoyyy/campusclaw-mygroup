@@ -20,6 +20,16 @@ cp .env.example .env
 
 编辑 `.env`，把 `SESSION_SECRET`、`DB_PASSWORD`、`DB_ROOT_PASSWORD` 和三个 `SEED_*_PASSWORD` 的占位符全部换成各自独立的强随机值。若先只用关键词检索，六个模型网关变量保持空白即可：上传和教师重建仍写入 MySQL 切片，页面默认关键词检索。数据库的 `failed` 状态此时仅表示**向量尚未生成**，不妨碍关键词检索。`GET /api/retrieval/capabilities` 可查看当前可用能力。准备开启完整功能时再填 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY` 及 `CHAT_BASE_URL`、`CHAT_MODEL`、`CHAT_API_KEY`。Base URL 应是兼容 OpenAI 的 API 根路径，Go 服务会分别追加 `/embeddings` 与 `/chat/completions`。模型密钥只交给 API 容器，不进入浏览器或仓库。配置嵌入模型后重启会自动补齐缺失向量，也可由教师手动重建。`.env` 已被 Git 与 Docker 构建上下文排除。可按需修改 `WEB_PORT`（默认 8080）和 `MAX_UPLOAD_BYTES`（默认 10485760）。
 
+只开启向量和混合检索时，无需配置对话模型。登录[课程网关](https://ai-gateway.devops.hello1023.com/)取得本人 API Key 和可用的向量模型名，在本地 `.env` 填入以下三项（模型名以本人网关页面为准）：
+
+```dotenv
+EMBEDDING_BASE_URL=https://ai-gateway.devops.hello1023.com/v1
+EMBEDDING_MODEL=course-embedding
+EMBEDDING_API_KEY=在本地填入本人网关密钥
+```
+
+重建 API 容器后，启动时会自动重试此前标记为 `failed` 的切片；首次补建可能需要一段时间。材料列表状态变为 `ready` 后，可运行 `python3 scripts/verify_vector_only.py` 验证三种检索、本班可见和跨班隔离。切换嵌入模型时，必须确认它与现有 Qdrant 集合的向量维度一致；若不一致，应先按迁移方案重建向量集合，不能直接混用。
+
 ```sh
 docker compose up --build -d
 docker compose ps
