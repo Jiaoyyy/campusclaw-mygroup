@@ -184,7 +184,7 @@ export default function MaterialsPage({ profile, onAuthLost }: { profile: Profil
             {answerEnabled && <button type="button" disabled={asking} onClick={() => void ask()}>{asking ? '回答中…' : '简短回答'}</button>}
           </form>
           {retrievalDone && (retrievalHits.length === 0 ? <p className="retrieval-empty" role="status">资料中未找到相关内容。</p> : <ul className="retrieval-results">{retrievalHits.map((hit) => <li key={hit.chunk_id}><button type="button" onClick={() => void openMaterial(hit.material_id, true)}><strong>{hit.title}</strong><span>第 {hit.chunk_index} 段 · 字符 {hit.start_offset + 1}–{hit.end_offset} · 查看原文 →</span><small>{hit.snippet}</small></button></li>)}</ul>)}
-          {answer && <div className="answer-panel"><h3>依据本班材料的回答</h3><p>{answer}</p>{citations.length > 0 && <ol>{citations.map((hit) => <li key={hit.chunk_id}><button type="button" onClick={() => void openMaterial(hit.material_id, true)}>[{citations.indexOf(hit) + 1}] {hit.title} · 第 {hit.chunk_index} 段</button></li>)}</ol>}</div>}
+          {answer && <div className="answer-panel"><h3>依据本班材料的回答</h3><p>{answer}</p>{citations.length > 0 && <ol>{citations.map((hit) => <li key={hit.chunk_id}><button type="button" onClick={() => void openMaterial(hit.material_id, true)}>[{hit.citation_number ?? citations.indexOf(hit) + 1}] {hit.title} · 第 {hit.chunk_index} 段</button></li>)}</ol>}</div>}
         </section>
         <div className="content-grid">
           <section className="panel" aria-labelledby="materials-title">

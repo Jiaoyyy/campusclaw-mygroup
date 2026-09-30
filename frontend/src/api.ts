@@ -28,6 +28,7 @@ export type RetrievalHit = {
   end_offset: number
   snippet: string
   score: number
+  citation_number?: number
 }
 
 export class ApiError extends Error {

@@ -30,6 +30,8 @@ EMBEDDING_API_KEY=在本地填入本人网关密钥
 
 重建 API 容器后，启动时会自动重试此前标记为 `failed` 的切片；首次补建可能需要一段时间。材料列表状态变为 `ready` 后，可运行 `python3 scripts/verify_vector_only.py` 验证三种检索、本班可见和跨班隔离。切换嵌入模型时，必须确认它与现有 Qdrant 集合的向量维度一致；若不一致，应先按迁移方案重建向量集合，不能直接混用。
 
+若要启用“简短回答”，同一课程网关还提供 `POST /v1/chat/completions`。在本地 `.env` 增加 `CHAT_BASE_URL=https://ai-gateway.devops.hello1023.com/v1`、`CHAT_MODEL=course-chat`，并将本人网关 Key 填入 `CHAT_API_KEY`，随后重建 API 容器。用于实际试用的三份虚构材料和问题见[检索与问答试用材料](docs/retrieval-demo.md)。
+
 ```sh
 docker compose up --build -d
 docker compose ps

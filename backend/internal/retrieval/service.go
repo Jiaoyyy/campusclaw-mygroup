@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -20,15 +21,16 @@ const (
 )
 
 type Hit struct {
-	ChunkID    int64   `json:"chunk_id"`
-	MaterialID int64   `json:"material_id"`
-	Title      string  `json:"title"`
-	ChunkIndex int     `json:"chunk_index"`
-	Start      int     `json:"start_offset"`
-	End        int     `json:"end_offset"`
-	Snippet    string  `json:"snippet"`
-	Score      float64 `json:"score"`
-	ChunkText  string  `json:"-"`
+	ChunkID        int64   `json:"chunk_id"`
+	MaterialID     int64   `json:"material_id"`
+	Title          string  `json:"title"`
+	ChunkIndex     int     `json:"chunk_index"`
+	Start          int     `json:"start_offset"`
+	End            int     `json:"end_offset"`
+	Snippet        string  `json:"snippet"`
+	Score          float64 `json:"score"`
+	CitationNumber int     `json:"citation_number,omitempty"`
+	ChunkText      string  `json:"-"`
 }
 
 type Service struct {
@@ -139,7 +141,30 @@ func (s *Service) Ask(w http.ResponseWriter, r *http.Request) {
 		writeStatus(w, http.StatusServiceUnavailable)
 		return
 	}
-	auth.WriteJSON(w, http.StatusOK, map[string]any{"answer": answer, "citations": hits})
+	citations := citedHits(answer, hits)
+	if len(citations) == 0 {
+		writeStatus(w, http.StatusServiceUnavailable)
+		return
+	}
+	auth.WriteJSON(w, http.StatusOK, map[string]any{"answer": answer, "citations": citations})
+}
+
+func citedHits(answer string, hits []Hit) []Hit {
+	used := make(map[int]bool)
+	for _, match := range citationPattern.FindAllStringSubmatch(answer, -1) {
+		number, err := strconv.Atoi(match[1])
+		if err == nil && number >= 1 && number <= len(hits) {
+			used[number] = true
+		}
+	}
+	citations := make([]Hit, 0, len(used))
+	for index, hit := range hits {
+		if used[index+1] {
+			hit.CitationNumber = index + 1
+			citations = append(citations, hit)
+		}
+	}
+	return citations
 }
 
 func validQuery(query string) bool {

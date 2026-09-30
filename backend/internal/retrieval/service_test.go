@@ -14,3 +14,11 @@ func TestExcerptUsesUnicodeCharacters(t *testing.T) {
 		t.Fatal("Unicode query or excerpt failed")
 	}
 }
+
+func TestCitedHitsExcludeUnusedSourcesAndKeepNumbers(t *testing.T) {
+	hits := []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}
+	citations := citedHits("见 [3] 和 [1]，仍见 [3]。", hits)
+	if len(citations) != 2 || citations[0].ChunkID != 1 || citations[0].CitationNumber != 1 || citations[1].ChunkID != 3 || citations[1].CitationNumber != 3 {
+		t.Fatalf("incorrect citations: %+v", citations)
+	}
+}

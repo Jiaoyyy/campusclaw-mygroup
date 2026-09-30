@@ -100,3 +100,9 @@
 用户提供 `https://ai-gateway.devops.hello1023.com/v1`、`course-embedding`，并在本地 Git 忽略的 `.env` 填入本人网关密钥；密钥未进入仓库、日志或测试输出。用户明确同意将现有 A、B 班材料切片发送至该课程网关。对公开测试词 `hello` 的 `/embeddings` 请求返回 200 和 2048 维向量。保留 MySQL、上传及 Qdrant 原卷重启 API 后，A 班 3 份、B 班 1 份材料均由 `failed` 转为 `ready`，Qdrant 集合包含 4 个 2048 维 Cosine 点。
 
 `scripts/verify_vector_only.py` 用非材料原文的普通问题验证：能力接口为 `vector_enabled=true`、`default_mode=hybrid`、`answer_enabled=false`；A 班关键词、向量、混合分别返回 1、2、2 条，B 班的混合结果均属于 B 班，匿名向量请求为 401。该验收只证明当前网关、数据和权限链路可用；对话模型尚未配置，简短回答仍不可用。
+
+## 三份虚构材料与真实问答验收（2026-09-30）
+
+在本地 `.env` 配置同一课程网关的 `course-chat`，使用公开测试语句确认 `/v1/chat/completions` 返回 200；随后重启 API，能力接口为 `answer_enabled=true`。将 `examples/retrieval-demo/` 的三份虚构 `.md` 文件上传到 A 班，材料 ID 分别为 5、6、7，索引均为 `ready`。
+
+以 A 班学生提问“图书馆的普通图书能借多久，可以续借几次？”：keyword、vector、hybrid 均命中图书馆文件；问答返回 14 个自然日、最多续借一次并标注 `[1]`。实验室洒出液体及晨星项目提交两题也命中并正确引用各自文件。B 班材料列表和混合检索不包含这三份 A 班演示文件。首次实测发现候选出处列表包含未在回答中使用的材料；服务端现仅返回实际引用切片及其原始编号，前端按该编号显示。重新部署后实验室回答只显示 `[1]` 实验室材料。所有演示事实均为虚构，试用步骤见 `docs/retrieval-demo.md`。
