@@ -70,6 +70,13 @@ export default function MaterialsPage({ profile, onAuthLost, onNavigate }: { pro
     }
   }
 
+  useEffect(() => {
+    const materialId = Number(new URLSearchParams(window.location.search).get('material'))
+    if (Number.isSafeInteger(materialId) && materialId > 0) void openMaterial(materialId, true)
+  // Read the deep link when this page mounts after clicking a citation.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   async function retrieve(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const query = retrievalQuery.trim()
