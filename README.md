@@ -12,6 +12,8 @@
 
 接口测试按 URL 放在 `apitest/cases/`，一接口一脚本。启动服务后运行 `python3 apitest/run_all.py`；如测试端口不是 `.env` 中的 `WEB_PORT`，先设置 `APITEST_PORT`。数据库一致性检查通过 `docker compose exec` 读取**对应 Compose 项目**中的 MySQL，独立测试项目需同时设置 `APITEST_PROJECT`。报告写入 `apitest/report.html`，已被 Git 忽略。测试会在当前环境创建演示材料、技能、智能体和会话；需要干净验收时使用独立 Compose 项目与独立卷。模型密钥仍仅放本地 `.env`。
 
+对已运行且已有 A 班学生会话的环境，可执行 `python3 scripts/verify_week05_boundaries.py` 复核会话归属、跨班资源 404 和学生写技能 403。它不会打印凭据，也不会创建记录；运行结果和仍需同伴亲自完成的步骤见[验收记录](docs/verification.md)。
+
 按[第 3 课课件](https://devops.hello1023.com/%E8%AF%BE%E4%BB%B6/%E7%AC%AC3%E8%AF%BE-%E8%AF%BE%E4%BB%B6-%E8%AE%A4%E8%AF%81%E6%8E%88%E6%9D%83%E4%B8%8E%E7%9F%A5%E8%AF%86%E5%BA%93%E5%85%A5%E5%BA%93/index.html)实现的教学材料库，并在此基础上实现[第 4 课](https://devops.hello1023.com/%E8%AF%BE%E4%BB%B6/%E7%AC%AC4%E8%AF%BE-%E8%AF%BE%E4%BB%B6-%E5%8F%AF%E8%BF%BD%E6%BA%AF%E7%9F%A5%E8%AF%86%E5%BA%93%E6%A3%80%E7%B4%A2/index.html)的持久切片、三种检索与可追溯简短回答。前端为 React 18、TypeScript、Vite；Nginx 提供同源入口；Go `net/http` 提供 API；MySQL 8.0 保存账号、会话、原文和切片；Qdrant 保存向量。Docker Compose 是标准启动方式。
 
 本课只接收 UTF-8 `.txt`、`.md`：A 班教师可以上传本班文件，A 班师生可以在列表查找文件名、查看提取正文并经鉴权下载原文件。学生上传返回 403；跨班材料 ID 和不存在的 ID 都返回相同的 404。列表来自数据库，没有前端硬编码材料。PDF/DOCX 解析、OCR、公开注册、SSO、作业批改、流式长对话与生产多副本不在本课范围。
