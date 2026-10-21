@@ -13,6 +13,7 @@
 .assistant-global-nav button.active{color:#087c73;border-bottom-color:#087c73}
 .assistant-account{margin-left:auto;display:flex;align-items:center;gap:16px;font-size:13px;white-space:nowrap;color:#687b7f}
 .assistant-class{border-radius:20px;padding:7px 13px;background:#e7f4f0;color:#087c73;font-weight:800}
+.assistant-logout{border:1px solid #e2ebe8;border-radius:8px;background:#fff;color:#63787a;padding:7px 11px;font-size:12px;font-weight:700}.assistant-logout:hover{border-color:#9acabc;color:#087c73}
 .assistant-flash{position:fixed;z-index:10;top:82px;left:50%;transform:translateX(-50%);max-width:min(680px,calc(100% - 24px));min-width:240px;display:flex;align-items:center;justify-content:space-between;gap:15px;padding:12px 15px;border-radius:11px;box-shadow:0 12px 32px #123e4930;font-size:14px}
 .assistant-flash.error{background:#fff0ec;color:#9b3e2b}.assistant-flash.notice{background:#e3f6ef;color:#176a54}.assistant-flash button{border:0;background:transparent;color:inherit;font-size:20px;line-height:1}
 .assistant-overline{display:block;color:#13887d;font-size:10px;font-weight:900;letter-spacing:.2em}

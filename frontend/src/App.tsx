@@ -11,8 +11,9 @@ export default function App() {
   const [startupError, setStartupError] = useState('')
   const [page, setPage] = useState(window.location.pathname === '/tutor' ? 'tutor' : 'materials')
 
-  const navigate = (next: 'materials' | 'tutor', materialId?: number) => {
-    window.history.pushState(null, '', `/${next}${next === 'materials' && materialId ? `?material=${materialId}` : ''}`)
+  const navigate = (next: 'materials' | 'tutor', materialId?: number, tutorView?: 'chat' | 'settings') => {
+    const query = next === 'materials' && materialId ? `?material=${materialId}` : next === 'tutor' && tutorView === 'settings' ? '?view=settings' : ''
+    window.history.pushState(null, '', `/${next}${query}`)
     setPage(next)
   }
 
@@ -65,5 +66,5 @@ export default function App() {
     setProfile(null)
     window.history.replaceState(null, '', '/login')
   }
-  return page === 'tutor' ? <TutorPage profile={profile} onAuthLost={onAuthLost} onNavigate={(materialId) => navigate('materials', materialId)} /> : <MaterialsPage profile={profile} onAuthLost={onAuthLost} onNavigate={() => navigate('tutor')} />
+  return page === 'tutor' ? <TutorPage profile={profile} onAuthLost={onAuthLost} onNavigate={(materialId) => navigate('materials', materialId)} /> : <MaterialsPage profile={profile} onAuthLost={onAuthLost} onNavigate={(view) => navigate('tutor', undefined, view)} />
 }

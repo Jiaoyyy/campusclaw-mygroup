@@ -45,7 +45,7 @@ export default function TutorPage({ profile, onAuthLost, onNavigate }: { profile
   const [partial, setPartial] = useState('')
   const [liveCitations, setLiveCitations] = useState<RetrievalHit[]>([])
   const [liveSkill, setLiveSkill] = useState('')
-  const [view, setView] = useState<'chat' | 'settings'>('chat')
+  const [view, setView] = useState<'chat' | 'settings'>(window.location.search.includes('view=settings') && profile.role === 'teacher' ? 'settings' : 'chat')
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('agents')
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
@@ -77,6 +77,7 @@ export default function TutorPage({ profile, onAuthLost, onNavigate }: { profile
     } catch (cause) { handleError(cause) }
   }, [handleError])
   useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => { window.history.replaceState(null, '', view === 'settings' ? '/tutor?view=settings' : '/tutor') }, [view])
   useEffect(() => { messagesEnd.current?.scrollIntoView({ behavior: streaming ? 'smooth' : 'instant', block: 'end' }) }, [selected?.messages?.length, partial, streaming])
 
   async function openConversation(id: number) {
@@ -125,6 +126,12 @@ export default function TutorPage({ profile, onAuthLost, onNavigate }: { profile
       setNotice('智能体已保存，绑定对下一次提问生效。'); setError(''); await refresh()
     } catch (cause) { handleError(cause) }
   }
+  async function logout() {
+    try {
+      await api('/api/logout', { method: 'POST', headers: { 'X-CSRF-Token': profile.csrf_token } })
+      onAuthLost()
+    } catch (cause) { handleError(cause) }
+  }
   function toggle(key: 'skill_ids' | 'material_ids', id: number) {
     setAgentForm((old) => ({ ...old, [key]: old[key].includes(id) ? old[key].filter((value) => value !== id) : [...old[key], id] }))
   }
@@ -147,7 +154,7 @@ export default function TutorPage({ profile, onAuthLost, onNavigate }: { profile
     <header className="assistant-topbar">
       <div className="assistant-brand"><span className="assistant-brand-mark">C</span><span>CampusClaw <small>学习空间</small></span></div>
       <nav className="assistant-global-nav" aria-label="主导航"><button type="button" onClick={() => onNavigate()}>教学材料</button><button type="button" className={view === 'chat' ? 'active' : ''} onClick={() => setView('chat')}>智能助手</button>{isTeacher && <button type="button" className={view === 'settings' ? 'active' : ''} onClick={() => { setView('settings'); setNotice('') }}>教师配置</button>}</nav>
-      <div className="assistant-account"><span className="assistant-class">{profile.class_name} 班</span><span className="assistant-account-name">{profile.username} · {isTeacher ? '教师' : '学生'}</span></div>
+      <div className="assistant-account"><span className="assistant-class">{profile.class_name} 班</span><span className="assistant-account-name">{profile.username} · {isTeacher ? '教师' : '学生'}</span><button type="button" className="assistant-logout" onClick={() => void logout()}>退出</button></div>
     </header>
 
     {error && <div className="assistant-flash error" role="alert">{error}<button type="button" onClick={() => setError('')} aria-label="关闭错误提示">×</button></div>}
