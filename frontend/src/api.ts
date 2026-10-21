@@ -58,6 +58,33 @@ function requestInit(init?: RequestInit): RequestInit {
   return { ...init, credentials: 'omit', cache: 'no-store', headers }
 }
 
+export async function streamMessage(id: number, content: string, csrf: string, onEvent: (event: string, data: Record<string, unknown>) => void): Promise<void> {
+  const response = await fetch(`/api/conversations/${id}/messages`, requestInit({
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ content }),
+  }))
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    throw new ApiError(response.status, typeof payload.error === 'string' ? payload.error : '发送失败')
+  }
+  if (!response.body) throw new Error('浏览器无法读取流式回答')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let pending = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    pending += decoder.decode(value, { stream: !done })
+    let end: number
+    while ((end = pending.indexOf('\n\n')) >= 0) {
+      const frame = pending.slice(0, end).replace(/\r/g, '')
+      pending = pending.slice(end + 2)
+      const event = frame.split('\n').find((line) => line.startsWith('event:'))?.slice(6).trim()
+      const data = frame.split('\n').find((line) => line.startsWith('data:'))?.slice(5).trim()
+      if (event && data) onEvent(event, JSON.parse(data) as Record<string, unknown>)
+    }
+    if (done) break
+  }
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, requestInit(init))
   const payload = await response.json().catch(() => ({}))

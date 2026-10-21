@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { api, ApiError, downloadMaterial, messageFor, type Material, type MaterialDetail, type Profile, type RetrievalHit } from '../api'
 
-export default function MaterialsPage({ profile, onAuthLost }: { profile: Profile, onAuthLost: () => void }) {
+export default function MaterialsPage({ profile, onAuthLost, onNavigate }: { profile: Profile, onAuthLost: () => void, onNavigate: () => void }) {
   const [items, setItems] = useState<Material[]>([])
   const [selected, setSelected] = useState<MaterialDetail | null>(null)
   const [search, setSearch] = useState('')
@@ -169,7 +169,7 @@ export default function MaterialsPage({ profile, onAuthLost }: { profile: Profil
     <div className="app-shell">
       <header className="topbar">
         <div className="brand"><span className="brand-icon">CC</span><span>CampusClaw</span></div>
-        <div className="session-info"><span className="class-pill">{profile.class_name} 班</span><span>{profile.username} · {profile.role === 'teacher' ? '教师' : '学生'}</span><button className="text-button" onClick={() => void logout()}>退出登录</button></div>
+        <div className="session-info"><button className="text-button" onClick={onNavigate}>解题助手</button><span className="class-pill">{profile.class_name} 班</span><span>{profile.username} · {profile.role === 'teacher' ? '教师' : '学生'}</span><button className="text-button" onClick={() => void logout()}>退出登录</button></div>
       </header>
       <main className="workspace">
         <div className="page-heading"><div><span className="eyebrow">本班资料</span><h1>教学材料</h1><p>这里仅展示 {profile.class_name} 班的文件和知识库正文。</p></div><span className="count-badge">{items.length} 份材料</span></div>

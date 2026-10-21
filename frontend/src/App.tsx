@@ -2,12 +2,25 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError, clearToken, getToken, messageFor, type Profile } from './api'
 import LoginPage from './pages/LoginPage'
 import MaterialsPage from './pages/MaterialsPage'
+import TutorPage from './pages/TutorPage'
 import './styles.css'
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
   const [startupError, setStartupError] = useState('')
+  const [page, setPage] = useState(window.location.pathname === '/tutor' ? 'tutor' : 'materials')
+
+  const navigate = (next: 'materials' | 'tutor') => {
+    window.history.pushState(null, '', `/${next}`)
+    setPage(next)
+  }
+
+  useEffect(() => {
+    const changed = () => setPage(window.location.pathname === '/tutor' ? 'tutor' : 'materials')
+    window.addEventListener('popstate', changed)
+    return () => window.removeEventListener('popstate', changed)
+  }, [])
 
   const checkSession = useCallback(() => {
     setStartupError('')
@@ -47,9 +60,10 @@ export default function App() {
     }} />
   }
 
-  return <MaterialsPage profile={profile} onAuthLost={() => {
+  const onAuthLost = () => {
     clearToken()
     setProfile(null)
     window.history.replaceState(null, '', '/login')
-  }} />
+  }
+  return page === 'tutor' ? <TutorPage profile={profile} onAuthLost={onAuthLost} onNavigate={() => navigate('materials')} /> : <MaterialsPage profile={profile} onAuthLost={onAuthLost} onNavigate={() => navigate('tutor')} />
 }

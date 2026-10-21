@@ -10,7 +10,9 @@ import (
 	"campusclaw/backend/internal/config"
 	"campusclaw/backend/internal/db"
 	"campusclaw/backend/internal/materials"
+	"campusclaw/backend/internal/openapi"
 	"campusclaw/backend/internal/retrieval"
+	"campusclaw/backend/internal/tutor"
 )
 
 func main() {
@@ -42,6 +44,7 @@ func main() {
 		log.Fatal("authentication initialization failed")
 	}
 	mux := http.NewServeMux()
+	openapi.Mount(mux)
 	embedder := retrieval.NewEmbedder(cfg)
 	vectors := retrieval.NewVectorStore(cfg)
 	indexer := retrieval.NewIndexer(database, embedder, vectors, cfg.VectorEnabled())
@@ -49,7 +52,9 @@ func main() {
 	mux.HandleFunc("/api/logout", authService.Logout)
 	mux.HandleFunc("/api/me", authService.Me)
 	materials.New(database, cfg, authService).WithIndexer(indexer).Register(mux)
-	retrieval.New(database, authService, embedder, vectors, retrieval.NewAnswerer(cfg), cfg.VectorEnabled(), cfg.AnswerEnabled()).Register(mux)
+	searchService := retrieval.New(database, authService, embedder, vectors, retrieval.NewAnswerer(cfg), cfg.VectorEnabled(), cfg.AnswerEnabled())
+	searchService.Register(mux)
+	tutor.New(database, authService, searchService, cfg).Register(mux)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		auth.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})

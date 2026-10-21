@@ -110,3 +110,12 @@
 ## 再增加三份计算机课程演示讲义（2026-09-30）
 
 将二叉搜索树、TCP 三次握手、事务 ACID 三份讲义上传到 A 班，材料 ID 为 8、9、10，索引均为 `ready`。A 班学生用 `docs/retrieval-demo.md` 所列问题做混合检索，三题的首条命中均为对应讲义；简短回答分别给出中序遍历升序、SYN → SYN+ACK → ACK、原子性与持久性的区别，并引用对应讲义。B 班材料列表以及 keyword、vector、hybrid 三种检索均不包含这些 A 班材料。
+## 第 5 课个人任务（2026-10-21）
+
+按[第 5 课任务清单](https://devops.hello1023.com/课程任务清单-第5课.html)在现有第 4 课仓库增量实现：教师技能文件与智能体提示词/绑定、学生私有会话、绑定材料内的检索、解题引导路由、OpenAI 兼容对话网关的 SSE 输出、浏览器 `/swagger` 和 `/openapi.json`。第 4 课的本班检索与单次 `/api/ask` 继续保留；Bearer token 和 CSRF 逻辑沿用既有认证。
+
+在独立 Compose 项目 `cc-week05-check`（本机端口 18095，独立 MySQL/上传/Qdrant 卷）运行 `APITEST_PORT=18095 APITEST_PROJECT=cc-week05-check python3 apitest/run_all.py`，8 个按 URL 组织的接口脚本全部通过。它们检查登录无 Cookie、Bearer 身份与数据库用户行、上传材料与库中材料行、关键词命中与切片行、学生写技能 403、他班智能体 404、会话归属与他班 404、SSE 的 meta/delta/done、持久化回答与数据库正文一致、技能停用后立即不路由、解绑材料后仍生成无引用回答，以及 Swagger/OpenAPI 页面和资源可访问。报告在 `apitest/report.html`，由 `.gitignore` 排除。测试创建的资料、技能与会话仅位于隔离项目，未写入正常 `18082` 环境。
+
+同轮检查：Go `go test ./...` 通过（容器内 Go 1.24）、前端 `npm run build` 与既有 UI/Markdown 检查通过、`openspec validate add-lesson05-tutor --strict` 通过。尚需另一名同学按课件要求以其账号完成会话归属、智能体隔离、班级边界和技能开关的**交叉验证**并保存证据；当前自动化自测不能冒充同伴复核。
+
+正常本机 Compose 环境随后以保留原卷的 `docker compose up -d --build` 更新；`http://127.0.0.1:18082/tutor`、`/swagger`、`/openapi.json` 均返回 200。运行 `scripts/setup_week05_demo.py` 后，A 班新增「数据结构解题引导」技能与「数据结构解题助手」，绑定既有 `演示-数据结构-二叉搜索树.md`，未删除原材料。使用 A 班学生实际新建会话并提问，收到 `meta → 122 次 delta → done`，数据库中保存 1 条带出处及技能名的助手消息；这是模型输出与本地数据的当次验证，不保证其他提问都得到相同措辞。

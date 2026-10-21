@@ -224,6 +224,71 @@ func (s *Service) keyword(ctx context.Context, classID int64, term string, limit
 	return hits, rows.Err()
 }
 
+// SearchBound searches only explicitly bound materials. The class predicate stays in
+// the SQL query, so a caller cannot widen access by providing another material ID.
+func (s *Service) SearchBound(ctx context.Context, classID int64, term string, materialIDs []int64, limit int) ([]Hit, error) {
+	if len(materialIDs) == 0 {
+		return []Hit{}, nil
+	}
+	allowed := make(map[int64]bool, len(materialIDs))
+	for _, id := range materialIDs {
+		allowed[id] = true
+	}
+	placeholders := make([]string, len(materialIDs))
+	args := []any{term, classID, term}
+	for i, id := range materialIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	queryLimit := limit
+	if s.vectorEnabled {
+		queryLimit = maxHits
+	}
+	args = append(args, queryLimit)
+	query := `SELECT c.id,c.material_id,m.original_filename,c.chunk_index,c.start_offset,c.end_offset,c.chunk_text,
+		MATCH(c.chunk_text) AGAINST (? IN NATURAL LANGUAGE MODE) AS relevance
+		FROM knowledge_chunks c JOIN materials m ON m.id=c.material_id AND m.class_id=c.class_id
+		WHERE c.class_id=? AND c.index_status IN ('ready','failed')
+		AND MATCH(c.chunk_text) AGAINST (? IN NATURAL LANGUAGE MODE)>0
+		AND c.material_id IN (` + strings.Join(placeholders, ",") + `)
+		ORDER BY relevance DESC,c.id ASC LIMIT ?`
+	rows, err := s.database.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	hits := []Hit{}
+	for rows.Next() {
+		var hit Hit
+		if err := rows.Scan(&hit.ChunkID, &hit.MaterialID, &hit.Title, &hit.ChunkIndex, &hit.Start, &hit.End, &hit.ChunkText, &hit.Score); err != nil {
+			return nil, err
+		}
+		hit.Snippet = excerpt(hit.ChunkText)
+		hits = append(hits, hit)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !s.vectorEnabled {
+		if len(hits) > limit {
+			hits = hits[:limit]
+		}
+		return hits, nil
+	}
+	// The vector store is class-filtered; bound IDs are checked again in MySQL hits.
+	vectorHits, err := s.vector(ctx, classID, term, 100)
+	if err != nil {
+		return nil, err
+	}
+	boundVectors := make([]Hit, 0, len(vectorHits))
+	for _, hit := range vectorHits {
+		if allowed[hit.MaterialID] {
+			boundVectors = append(boundVectors, hit)
+		}
+	}
+	return fuse(hits, boundVectors, limit), nil
+}
+
 func (s *Service) vector(ctx context.Context, classID int64, term string, limit int) ([]Hit, error) {
 	vector, err := s.embedder.Embed(ctx, term)
 	if err != nil {

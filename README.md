@@ -1,4 +1,16 @@
-# CampusClaw · 第 3 课基础与第 4 课可追溯检索
+# CampusClaw · 第 3–5 课课堂项目
+
+## 第 5 课：解题助手、技能与流式会话
+
+登录后在顶部进入「解题助手」。教师先在页面下方保存一份技能文件，再建智能体，填写角色提示词并勾选本班技能和材料；学生选择已启用的智能体创建会话，提问后可逐段看到回答与引用。技能文件使用课程的中文字段格式，空行前写 `名称`、`适用条件`、可选 `资料`、可选 `工具：knowledge_search`、`启用：是/否`，空行后写引导说明。名称含「解题引导」时会增加不直接给最终答案的约束。技能停用或智能体绑定变更对已有会话的**下一轮**立即生效。没有命中绑定材料时仍由对话模型回答，但引用为空；原有 `/api/ask` 的无依据行为保持不变。
+
+如果本地已有 `演示-数据结构-二叉搜索树.md`，可运行 `python3 scripts/setup_week05_demo.py` 幂等创建 A 班的演示技能和智能体；它只从本地 `.env` 读取教师口令，不打印凭据。随后用 `student_a1` 进入「解题助手」，选择「数据结构解题助手」，提问“二叉搜索树查找时下一步该比较哪个节点？”即可演示流式回答。
+
+会话只对本人和本班可见。新会话必须选本班已启用的智能体；已有会话锁定该智能体，即使它后来停用仍可继续。模型每轮只带最近 6 条消息，每条最多 500 字；上传材料正文只放在用户消息中，系统消息放角色与技能约束。前端用 POST + `fetch` 读取 SSE 的 `meta`、`delta`、`done`、`error`。Nginx 已关闭该代理路径的响应缓冲。
+
+浏览器打开 `/swagger` 可试调主要接口，原始 OpenAPI 描述在 `/openapi.json`。先调用 `/api/login`，将返回的 `access_token` 填进 Swagger 的 Authorize，再调用 `/api/me`，把 `csrf_token` 填进写接口的 `X-CSRF-Token`。OpenAPI 文件由 `python3 backend/internal/openapi/generate.py` 生成，API 路由变化时应同步更新其操作目录并重新生成。
+
+接口测试按 URL 放在 `apitest/cases/`，一接口一脚本。启动服务后运行 `python3 apitest/run_all.py`；如测试端口不是 `.env` 中的 `WEB_PORT`，先设置 `APITEST_PORT`。数据库一致性检查通过 `docker compose exec` 读取**对应 Compose 项目**中的 MySQL，独立测试项目需同时设置 `APITEST_PROJECT`。报告写入 `apitest/report.html`，已被 Git 忽略。测试会在当前环境创建演示材料、技能、智能体和会话；需要干净验收时使用独立 Compose 项目与独立卷。模型密钥仍仅放本地 `.env`。
 
 按[第 3 课课件](https://devops.hello1023.com/%E8%AF%BE%E4%BB%B6/%E7%AC%AC3%E8%AF%BE-%E8%AF%BE%E4%BB%B6-%E8%AE%A4%E8%AF%81%E6%8E%88%E6%9D%83%E4%B8%8E%E7%9F%A5%E8%AF%86%E5%BA%93%E5%85%A5%E5%BA%93/index.html)实现的教学材料库，并在此基础上实现[第 4 课](https://devops.hello1023.com/%E8%AF%BE%E4%BB%B6/%E7%AC%AC4%E8%AF%BE-%E8%AF%BE%E4%BB%B6-%E5%8F%AF%E8%BF%BD%E6%BA%AF%E7%9F%A5%E8%AF%86%E5%BA%93%E6%A3%80%E7%B4%A2/index.html)的持久切片、三种检索与可追溯简短回答。前端为 React 18、TypeScript、Vite；Nginx 提供同源入口；Go `net/http` 提供 API；MySQL 8.0 保存账号、会话、原文和切片；Qdrant 保存向量。Docker Compose 是标准启动方式。
 
