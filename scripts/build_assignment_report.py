@@ -25,15 +25,16 @@ OUT = ROOT / 'output/pdf/campusclaw-personal-ai-platform-verification.pdf'
 OUT.parent.mkdir(parents=True, exist_ok=True)
 TEMP = ROOT / 'tmp/pdfs/assignment-report-body.pdf'
 TEMP.parent.mkdir(parents=True, exist_ok=True)
-pdfmetrics.registerFont(TTFont('Body', '/System/Library/Fonts/Supplemental/Arial Unicode.ttf'))
-pdfmetrics.registerFontFamily('Body', normal='Body', bold='Body', italic='Body', boldItalic='Body')
+pdfmetrics.registerFont(TTFont('Body', '/System/Library/Fonts/Supplemental/Songti.ttc', subfontIndex=6))
+pdfmetrics.registerFont(TTFont('BodyBold', '/System/Library/Fonts/Supplemental/Songti.ttc', subfontIndex=1))
+pdfmetrics.registerFontFamily('Body', normal='Body', bold='BodyBold', italic='Body', boldItalic='BodyBold')
 TEAL = colors.HexColor('#087C73')
 INK = colors.HexColor('#20383F')
 GRAY = colors.HexColor('#617579')
 styles = {
-    'title': ParagraphStyle('title', fontName='Body', fontSize=25, leading=37, textColor=INK, spaceAfter=18, wordWrap='CJK'),
-    'h1': ParagraphStyle('h1', fontName='Body', fontSize=18, leading=27, textColor=TEAL, spaceAfter=14, keepWithNext=True, wordWrap='CJK'),
-    'h2': ParagraphStyle('h2', fontName='Body', fontSize=12, leading=19, textColor=INK, spaceBefore=10, spaceAfter=6, keepWithNext=True, wordWrap='CJK'),
+    'title': ParagraphStyle('title', fontName='BodyBold', fontSize=25, leading=37, textColor=INK, spaceAfter=18, wordWrap='CJK'),
+    'h1': ParagraphStyle('h1', fontName='BodyBold', fontSize=18, leading=27, textColor=TEAL, spaceAfter=14, keepWithNext=True, wordWrap='CJK'),
+    'h2': ParagraphStyle('h2', fontName='BodyBold', fontSize=12, leading=19, textColor=INK, spaceBefore=10, spaceAfter=6, keepWithNext=True, wordWrap='CJK'),
     'body': ParagraphStyle('body', fontName='Body', fontSize=10, leading=17, textColor=INK, spaceAfter=9, wordWrap='CJK'),
     'small': ParagraphStyle('small', fontName='Body', fontSize=8.4, leading=13, textColor=GRAY, spaceAfter=7, wordWrap='CJK'),
     'code': ParagraphStyle('code', fontName='Body', fontSize=8.2, leading=12.5, textColor=INK, backColor=colors.HexColor('#F1F6F5'), borderPadding=9, spaceBefore=5, spaceAfter=12, wordWrap='CJK'),
