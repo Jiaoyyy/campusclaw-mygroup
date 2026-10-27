@@ -13,6 +13,7 @@ CASES = [
     'cases/api/retrieval/GET.py',
     'cases/api/skills/POST.py',
     'cases/api/agents/POST.py',
+    'cases/api/mcp/tools/GET.py',
     'cases/api/conversations/POST.py',
     'cases/api/conversations/id/messages/POST.py',
     'cases/openapi/GET.py',

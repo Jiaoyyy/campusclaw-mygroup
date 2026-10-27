@@ -10,17 +10,18 @@ import (
 )
 
 type Agent struct {
-	ID          int64   `json:"id"`
-	Name        string  `json:"name"`
-	Prompt      string  `json:"prompt"`
-	Enabled     bool    `json:"enabled"`
-	SkillIDs    []int64 `json:"skill_ids"`
-	MaterialIDs []int64 `json:"material_ids"`
+	ID           int64    `json:"id"`
+	Name         string   `json:"name"`
+	Prompt       string   `json:"prompt"`
+	Enabled      bool     `json:"enabled"`
+	SkillIDs     []int64  `json:"skill_ids"`
+	MaterialIDs  []int64  `json:"material_ids"`
+	MCPToolNames []string `json:"mcp_tool_names"`
 }
 
 func (s *Service) agent(r *http.Request, classID, agentID int64, student bool) (Agent, error) {
 	var a Agent
-	a.SkillIDs, a.MaterialIDs = []int64{}, []int64{}
+	a.SkillIDs, a.MaterialIDs, a.MCPToolNames = []int64{}, []int64{}, []string{}
 	query := `SELECT id,name,prompt,enabled FROM tutor_agents WHERE id=? AND class_id=?`
 	if student {
 		query += ` AND enabled=TRUE`
@@ -55,6 +56,24 @@ func (s *Service) agent(r *http.Request, classID, agentID int64, student bool) (
 		if err != nil {
 			return a, err
 		}
+	}
+	rows, err := s.db.QueryContext(r.Context(), `SELECT tool_name FROM tutor_agent_mcp_tools WHERE agent_id=? AND class_id=? ORDER BY tool_name`, agentID, classID)
+	if err != nil {
+		return a, err
+	}
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			break
+		}
+		a.MCPToolNames = append(a.MCPToolNames, name)
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	rows.Close()
+	if err != nil {
+		return a, err
 	}
 	return a, nil
 }
@@ -136,6 +155,15 @@ func (s *Service) saveAgent(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid agent name or prompt")
 		return
 	}
+	allowed := allowedMCPTools(s.cfg)
+	seenTools := map[string]bool{}
+	for _, name := range a.MCPToolNames {
+		if !allowed[name] || len(name) > 128 || seenTools[name] {
+			fail(w, 400, "invalid MCP tool binding")
+			return
+		}
+		seenTools[name] = true
+	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		unavailable(w)
@@ -202,6 +230,16 @@ func (s *Service) saveAgent(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if _, err = tx.ExecContext(r.Context(), `DELETE FROM tutor_agent_mcp_tools WHERE agent_id=? AND class_id=?`, a.ID, id.ClassID); err != nil {
+		unavailable(w)
+		return
+	}
+	for _, name := range a.MCPToolNames {
+		if _, err = tx.ExecContext(r.Context(), `INSERT INTO tutor_agent_mcp_tools(agent_id,class_id,tool_name) VALUES(?,?,?)`, a.ID, id.ClassID, name); err != nil {
+			unavailable(w)
+			return
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		unavailable(w)
 		return
@@ -211,6 +249,9 @@ func (s *Service) saveAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.MaterialIDs == nil {
 		a.MaterialIDs = []int64{}
+	}
+	if a.MCPToolNames == nil {
+		a.MCPToolNames = []string{}
 	}
 	status := 200
 	if r.Method == http.MethodPost {

@@ -9,3 +9,6 @@ dist/
 # Local classroom submission evidence may include user-specific material names.
 docs/0930-token-login.png
 apitest/report*.html
+output/assignment-evidence/
+tmp/pdfs/assignment-render/
+tmp/pdfs/assignment-report-body.pdf

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"campusclaw/backend/internal/aicatalog"
 	"campusclaw/backend/internal/auth"
 	"campusclaw/backend/internal/config"
 	"campusclaw/backend/internal/retrieval"
@@ -27,6 +28,7 @@ func New(db *sql.DB, authentication *auth.Service, search *retrieval.Service, cf
 }
 
 func (s *Service) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/prompt-templates", s.listPromptTemplates)
 	mux.HandleFunc("GET /api/skills", s.listSkills)
 	mux.HandleFunc("POST /api/skills", s.saveSkill)
 	mux.HandleFunc("GET /api/skills/{id}", s.getSkill)
@@ -40,6 +42,30 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/conversations", s.createConversation)
 	mux.HandleFunc("GET /api/conversations/{id}", s.getConversation)
 	mux.HandleFunc("POST /api/conversations/{id}/messages", s.sendMessage)
+	mux.HandleFunc("GET /api/mcp/tools", s.listMCPTools)
+}
+
+func (s *Service) listPromptTemplates(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.identity(w, r, false, false); !ok {
+		return
+	}
+	auth.WriteJSON(w, 200, map[string]any{"templates": aicatalog.Templates()})
+}
+
+func (s *Service) listMCPTools(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.identity(w, r, true, false); !ok {
+		return
+	}
+	if !mcpConfigured(s.cfg) {
+		auth.WriteJSON(w, 200, map[string]any{"status": "disabled", "tools": []MCPTool{}})
+		return
+	}
+	tools, err := discoverMCPTools(r.Context(), s.cfg)
+	if err != nil {
+		auth.WriteJSON(w, 200, map[string]any{"status": "unavailable", "tools": []MCPTool{}})
+		return
+	}
+	auth.WriteJSON(w, 200, map[string]any{"status": "connected", "tools": tools})
 }
 
 func (s *Service) identity(w http.ResponseWriter, r *http.Request, teacher, write bool) (auth.Identity, bool) {
@@ -69,7 +95,7 @@ func number(r *http.Request) (int64, bool) {
 	return n, err == nil && n > 0
 }
 func readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	dec.DisallowUnknownFields()
 	if dec.Decode(dst) != nil || dec.Decode(new(any)) != io.EOF {
 		fail(w, 400, "invalid request")
@@ -101,8 +127,41 @@ type Skill struct {
 
 func parseSkill(text string) (Skill, error) {
 	var out Skill
+	original := text
 	if length(text) > 8000 {
 		return out, errors.New("skill file exceeds 8000 characters")
+	}
+	if strings.TrimSpace(text) == "" {
+		return out, errors.New("skill file is empty")
+	}
+	// Keep the original Markdown intact. Legacy field-based files remain readable.
+	if !strings.HasPrefix(strings.TrimSpace(text), "名称：") && !strings.HasPrefix(strings.TrimSpace(text), "名称:") {
+		lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+		if len(lines) > 2 && strings.TrimSpace(lines[0]) == "---" {
+			for _, line := range lines[1:] {
+				if strings.TrimSpace(line) == "---" {
+					break
+				}
+				if value, ok := strings.CutPrefix(strings.TrimSpace(line), "name:"); ok {
+					out.Name = strings.Trim(strings.TrimSpace(value), "\"'")
+				}
+			}
+		}
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if out.Name == "" && strings.HasPrefix(line, "# ") {
+				out.Name = strings.TrimSpace(strings.TrimPrefix(line, "# "))
+				break
+			}
+		}
+		if out.Name == "" || length(out.Name) > 32 {
+			return out, errors.New("skill Markdown needs a # title or frontmatter name of at most 32 characters")
+		}
+		out.TriggerText = out.Name
+		out.Description = text
+		out.SourceText = text
+		out.Enabled = true
+		return out, nil
 	}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	head, body, ok := strings.Cut(text, "\n\n")
@@ -150,7 +209,7 @@ func parseSkill(text string) (Skill, error) {
 	if out.Name == "" || out.TriggerText == "" || !seen["启用"] {
 		return out, errors.New("名称、适用条件和启用 are required")
 	}
-	out.Description, out.SourceText = strings.TrimSpace(body), text
+	out.Description, out.SourceText = strings.TrimSpace(body), original
 	if length(out.Name) > 32 || length(out.TriggerText) > 120 || length(out.SubjectText) > 32 || length(out.Description) > 2000 {
 		return out, errors.New("skill field exceeds length limit")
 	}
@@ -212,6 +271,7 @@ func (s *Service) saveSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	var input struct {
 		SourceText string `json:"source_text"`
+		Enabled    *bool  `json:"enabled"`
 	}
 	if !readJSON(w, r, &input) {
 		return
@@ -220,6 +280,9 @@ func (s *Service) saveSkill(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(w, 400, err.Error())
 		return
+	}
+	if input.Enabled != nil {
+		x.Enabled = *input.Enabled
 	}
 	if r.Method == http.MethodPost {
 		result, err := s.db.ExecContext(r.Context(), `INSERT INTO tutor_skills(class_id,name,trigger_text,subject_text,description,source_text,enabled) VALUES(?,?,?,?,?,?,?)`, id.ClassID, x.Name, x.TriggerText, x.SubjectText, x.Description, x.SourceText, x.Enabled)

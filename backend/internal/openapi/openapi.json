@@ -771,7 +771,7 @@
         ]
       },
       "post": {
-        "summary": "Teacher creates a skill from its text file",
+        "summary": "Teacher saves a complete Markdown skill file",
         "operationId": "post_api_skills",
         "responses": {
           "201": {
@@ -851,6 +851,71 @@
             }
           }
         }
+      }
+    },
+    "/api/prompt-templates": {
+      "get": {
+        "summary": "List reusable prompt templates",
+        "operationId": "get_api_prompt-templates",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "templates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "prompt": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database, retrieval or model service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     },
     "/api/skills/{id}": {
@@ -1390,6 +1455,60 @@
         }
       }
     },
+    "/api/mcp/tools": {
+      "get": {
+        "summary": "Teacher inspects server-approved MCP tools and connection status",
+        "operationId": "get_api_mcp_tools",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MCPTool"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database, retrieval or model service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/conversations": {
       "get": {
         "summary": "List only the current user's conversations",
@@ -1809,7 +1928,11 @@
         "type": "object",
         "properties": {
           "source_text": {
-            "type": "string"
+            "type": "string",
+            "description": "Complete Markdown skill file; a level-one heading or frontmatter name names the skill. Legacy field-based text is accepted."
+          },
+          "enabled": {
+            "type": "boolean"
           }
         }
       },
@@ -1869,6 +1992,26 @@
               "type": "integer",
               "format": "int64"
             }
+          },
+          "mcp_tool_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "MCPTool": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "input_schema": {
+            "type": "object"
           }
         }
       },
@@ -1928,6 +2071,9 @@
             }
           },
           "skill_name": {
+            "type": "string"
+          },
+          "mcp_tool_name": {
             "type": "string"
           }
         }

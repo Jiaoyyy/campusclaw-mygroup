@@ -5,6 +5,13 @@ import (
 	"testing"
 )
 
+func TestTutorChatDoesNotRequireEmbeddingModel(t *testing.T) {
+	cfg := Config{ChatBaseURL: "https://example.test/v1", ChatModel: "chat"}
+	if !cfg.ChatEnabled() || cfg.AnswerEnabled() {
+		t.Fatal("tutor chat must work independently while vector ask keeps its prerequisites")
+	}
+}
+
 func TestMissingSecretsFailWithoutLeakingValues(t *testing.T) {
 	valid := map[string]string{
 		"LISTEN_ADDR":              ":8080",

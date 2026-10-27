@@ -67,6 +67,11 @@ func Seed(ctx context.Context, database *sql.DB, cfg config.Config) (err error) 
 			return err
 		}
 	}
+	for _, classID := range []int64{classA, classB} {
+		if err = ensureApplications(ctx, tx, classID); err != nil {
+			return fmt.Errorf("seed AI applications: %w", err)
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("commit seed transaction: %w", err)
 	}

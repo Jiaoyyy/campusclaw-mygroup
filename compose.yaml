@@ -34,6 +34,9 @@ services:
       CHAT_BASE_URL: "${CHAT_BASE_URL:-}"
       CHAT_API_KEY: "${CHAT_API_KEY:-}"
       CHAT_MODEL: "${CHAT_MODEL:-}"
+      MCP_SERVER_URL: "${MCP_SERVER_URL:-}"
+      MCP_API_KEY: "${MCP_API_KEY:-}"
+      MCP_ALLOWED_TOOLS: "${MCP_ALLOWED_TOOLS:-}"
       QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
       QDRANT_COLLECTION: "${QDRANT_COLLECTION:-campusclaw_chunks}"
     volumes:

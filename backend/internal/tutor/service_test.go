@@ -30,6 +30,27 @@ func TestSkillParsingAndRouting(t *testing.T) {
 	}
 }
 
+func TestMarkdownSkillPreservesFullSource(t *testing.T) {
+	source := "# 数据结构解题引导\r\n\r\n## 目标\r\n只提示下一步。\r\n\r\n## 依据\r\n引用本班材料。\r\n"
+	skill, err := parseSkill(source)
+	if err != nil || skill.Name != "数据结构解题引导" || skill.SourceText != source || skill.Description != source || !skill.Enabled {
+		t.Fatalf("Markdown skill was not preserved: %+v %v", skill, err)
+	}
+	chosen := route("这道题我该怎么做？", []Skill{skill})
+	if chosen == nil || chosen.Name != skill.Name {
+		t.Fatal("single Markdown skill should be available without invented trigger fields")
+	}
+	messages := assemble(Agent{Prompt: "你是老师"}, chosen, "下一步？", nil, nil)
+	if !strings.Contains(messages[0].Content, "## 依据") || !strings.Contains(messages[0].Content, "引用本班材料") {
+		t.Fatal("complete skill source was not sent to the model")
+	}
+	frontmatter := "---\nname: '解题引导'\ndescription: Guide students\n---\n\n## Steps\nAsk one question.\n"
+	withFrontmatter, err := parseSkill(frontmatter)
+	if err != nil || withFrontmatter.Name != "解题引导" || withFrontmatter.SourceText != frontmatter {
+		t.Fatalf("frontmatter skill was not preserved: %+v %v", withFrontmatter, err)
+	}
+}
+
 func TestAssembleSeparatesEvidenceAndPrompt(t *testing.T) {
 	a := Agent{Prompt: "你是老师"}
 	skill := &Skill{Name: "数学解题引导", Description: "只提示下一步"}

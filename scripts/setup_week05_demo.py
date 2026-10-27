@@ -41,7 +41,7 @@ matching = [m for m in materials if '数据结构' in m['original_filename']]
 if not matching:
     raise SystemExit('A 班尚无数据结构演示材料；先上传 examples/retrieval-demo/演示-数据结构-二叉搜索树.md')
 material_id = matching[0]['id']
-source = (ROOT / 'examples/week05/数据结构解题引导.txt').read_text()
+source = (ROOT / 'examples/week05/skills.md').read_text()
 skills = call('GET', '/api/skills')['skills']
 skill = next((s for s in skills if s['name'] == '数据结构解题引导'), None)
 if skill is None:

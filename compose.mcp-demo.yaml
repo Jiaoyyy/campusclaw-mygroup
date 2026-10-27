@@ -1,0 +1,15 @@
+# Optional local demo. Do not include this file in normal deployments.
+services:
+  mcp-demo:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.mcp-demo
+    restart: unless-stopped
+
+  api:
+    environment:
+      MCP_SERVER_URL: http://mcp-demo:8090/mcp
+      MCP_API_KEY: ""
+      MCP_ALLOWED_TOOLS: course_glossary
+    depends_on:
+      - mcp-demo

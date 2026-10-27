@@ -20,13 +20,14 @@ schemas = {
     "LoginResult": obj(status=S, access_token=S, token_type=S, expires_at=S),
     "Profile": obj(id=I, username=S, role=S, class_id=I, class_name=S, csrf_token=S),
     "Hit": obj(chunk_id=I, material_id=I, title=S, chunk_index=I, start_offset=I, end_offset=I, snippet=S, score={"type": "number"}, citation_number=I),
-    "SkillInput": obj(source_text=S),
+    "SkillInput": obj(source_text={"type": "string", "description": "Complete Markdown skill file; a level-one heading or frontmatter name names the skill. Legacy field-based text is accepted."}, enabled=B),
     "Skill": obj(id=I, name=S, trigger_text=S, subject_text=S, description=S, source_text=S, enabled=B),
-    "Agent": obj(id=I, name=S, prompt=S, enabled=B, skill_ids=arr(I), material_ids=arr(I)),
+    "Agent": obj(id=I, name=S, prompt=S, enabled=B, skill_ids=arr(I), material_ids=arr(I), mcp_tool_names=arr(S)),
+    "MCPTool": obj(name=S, description=S, input_schema=O),
     "ConversationInput": obj(agent_id=I),
     "Conversation": obj(id=I, agent_id=I, title=S, updated_at=S),
     "MessageInput": obj(content=S),
-    "Message": obj(id=I, role=S, content=S, citations=arr(ref("Hit")), skill_name=S),
+    "Message": obj(id=I, role=S, content=S, citations=arr(ref("Hit")), skill_name=S, mcp_tool_name=S),
 }
 
 paths = {}
@@ -69,7 +70,8 @@ operation("GET", "/api/retrieval", "Search only the authenticated class", respon
 operation("POST", "/api/ask", "Single-turn answer with cited evidence", body="MessageInput", csrf=True, response=obj(answer=S,citations=arr(ref("Hit"))))
 paths["/api/ask"]["post"]["requestBody"]["content"]["application/json"]["schema"] = obj(question=S)
 operation("GET", "/api/skills", "List this class's skills", response=obj(skills=arr(ref("Skill"))))
-operation("POST", "/api/skills", "Teacher creates a skill from its text file", body="SkillInput", csrf=True, success=201, response=ref("Skill"))
+operation("GET", "/api/prompt-templates", "List reusable prompt templates", response=obj(templates=arr(obj(id=S,name=S,description=S,prompt=S))))
+operation("POST", "/api/skills", "Teacher saves a complete Markdown skill file", body="SkillInput", csrf=True, success=201, response=ref("Skill"))
 operation("GET", "/api/skills/{id}", "Read a class skill", params=[id_param], response=ref("Skill"))
 operation("PUT", "/api/skills/{id}", "Teacher edits a skill", params=[id_param], body="SkillInput", csrf=True, response=ref("Skill"))
 operation("DELETE", "/api/skills/{id}", "Teacher deletes a skill", params=[id_param], csrf=True)
@@ -77,6 +79,7 @@ operation("GET", "/api/agents", "List class agents; students see enabled only", 
 operation("POST", "/api/agents", "Teacher creates an agent and binds class resources", body="Agent", csrf=True, success=201, response=ref("Agent"))
 operation("GET", "/api/agents/{id}", "Read a class agent; disabled agents are hidden from students", params=[id_param], response=ref("Agent"))
 operation("PUT", "/api/agents/{id}", "Teacher edits an agent and its current bindings", params=[id_param], body="Agent", csrf=True, response=ref("Agent"))
+operation("GET", "/api/mcp/tools", "Teacher inspects server-approved MCP tools and connection status", response=obj(status=S, tools=arr(ref("MCPTool"))))
 operation("GET", "/api/conversations", "List only the current user's conversations", response=obj(conversations=arr(ref("Conversation"))))
 operation("POST", "/api/conversations", "Create a conversation with an enabled class agent", body="ConversationInput", csrf=True, success=201, response=ref("Conversation"))
 operation("GET", "/api/conversations/{id}", "Read only one's own conversation and messages", params=[id_param], response=obj(id=I,agent_id=I,title=S,messages=arr(ref("Message"))))

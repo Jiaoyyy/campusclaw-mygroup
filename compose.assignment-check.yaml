@@ -1,0 +1,18 @@
+# Isolated assignment verification; uses its own database and upload volumes.
+services:
+  web:
+    image: campusclaw-mygroup-web:latest
+  api:
+    image: campusclaw-mygroup-api:latest
+    environment:
+      CHAT_BASE_URL: http://host.docker.internal:18284/v1
+      EMBEDDING_BASE_URL: ""
+      EMBEDDING_MODEL: ""
+      EMBEDDING_API_KEY: ""
+      MCP_SERVER_URL: http://host.docker.internal:18284/mcp
+      MCP_API_KEY: ""
+      MCP_ALLOWED_TOOLS: course_glossary
+  mcp-demo:
+    image: campusclaw-mcp-demo-mcp-demo:latest
+    ports:
+      - "127.0.0.1:18285:8090"

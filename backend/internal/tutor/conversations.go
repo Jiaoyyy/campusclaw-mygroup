@@ -1,6 +1,7 @@
 package tutor
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,41 @@ import (
 	"campusclaw/backend/internal/retrieval"
 )
 
+func (s *Service) useMCPForQuestion(ctx context.Context, boundNames []string, question string) (string, string, string) {
+	if len(boundNames) == 0 || !mcpConfigured(s.cfg) {
+		return "", "", ""
+	}
+	allowedForAgent := map[string]bool{}
+	for _, name := range boundNames {
+		allowedForAgent[name] = true
+	}
+	tools, err := discoverMCPTools(ctx, s.cfg)
+	if err != nil {
+		return "", "", "MCP 连接暂不可用，本轮未使用外部工具"
+	}
+	bound := make([]MCPTool, 0, len(tools))
+	for _, tool := range tools {
+		if allowedForAgent[tool.Name] {
+			bound = append(bound, tool)
+		}
+	}
+	if len(bound) == 0 {
+		return "", "", "当前智能体绑定的 MCP 工具不可用"
+	}
+	name, args, err := chooseMCPTool(ctx, s.cfg, question, bound)
+	if err != nil {
+		return "", "", "外部工具选择失败，本轮仅使用本班材料"
+	}
+	if name == "" {
+		return "", "", ""
+	}
+	result, err := callMCPTool(ctx, s.cfg, name, args)
+	if err != nil {
+		return "", "", "外部工具调用失败，本轮仅使用本班材料"
+	}
+	return name, result, ""
+}
+
 type Conversation struct {
 	ID        int64     `json:"id"`
 	AgentID   int64     `json:"agent_id"`
@@ -22,11 +58,12 @@ type Conversation struct {
 	Messages  []Message `json:"messages,omitempty"`
 }
 type Message struct {
-	ID        int64           `json:"id"`
-	Role      string          `json:"role"`
-	Content   string          `json:"content"`
-	Citations []retrieval.Hit `json:"citations"`
-	SkillName string          `json:"skill_name,omitempty"`
+	ID          int64           `json:"id"`
+	Role        string          `json:"role"`
+	Content     string          `json:"content"`
+	Citations   []retrieval.Hit `json:"citations"`
+	SkillName   string          `json:"skill_name,omitempty"`
+	MCPToolName string          `json:"mcp_tool_name,omitempty"`
 }
 
 func (s *Service) owned(r *http.Request, userID, classID, conversationID int64) (Conversation, error) {
@@ -123,7 +160,7 @@ func (s *Service) getConversation(w http.ResponseWriter, r *http.Request) {
 		unavailable(w)
 		return
 	}
-	rows, err := s.db.QueryContext(r.Context(), `SELECT id,role,content,citations_json,skill_name FROM tutor_messages WHERE conversation_id=? ORDER BY id`, n)
+	rows, err := s.db.QueryContext(r.Context(), `SELECT m.id,m.role,m.content,m.citations_json,m.skill_name,t.tool_name FROM tutor_messages m LEFT JOIN tutor_message_mcp_tools t ON t.message_id=m.id WHERE m.conversation_id=? ORDER BY m.id`, n)
 	if err != nil {
 		unavailable(w)
 		return
@@ -133,8 +170,8 @@ func (s *Service) getConversation(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m Message
 		var citationJSON []byte
-		var skill sql.NullString
-		if rows.Scan(&m.ID, &m.Role, &m.Content, &citationJSON, &skill) != nil {
+		var skill, tool sql.NullString
+		if rows.Scan(&m.ID, &m.Role, &m.Content, &citationJSON, &skill, &tool) != nil {
 			unavailable(w)
 			return
 		}
@@ -144,6 +181,7 @@ func (s *Service) getConversation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		m.SkillName = skill.String
+		m.MCPToolName = tool.String
 		c.Messages = append(c.Messages, m)
 	}
 	if rows.Err() != nil {
@@ -155,6 +193,9 @@ func (s *Service) getConversation(w http.ResponseWriter, r *http.Request) {
 
 func route(question string, skills []Skill) *Skill {
 	sort.Slice(skills, func(i, j int) bool { return skills[i].ID < skills[j].ID })
+	if len(skills) == 1 && !strings.HasPrefix(strings.TrimSpace(skills[0].SourceText), "名称：") && !strings.HasPrefix(strings.TrimSpace(skills[0].SourceText), "名称:") {
+		return &skills[0]
+	}
 	text := strings.ToLower(question)
 	best := 0
 	var selected *Skill
@@ -261,7 +302,7 @@ func (s *Service) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	skill := route(question, skills)
-	if !s.cfg.AnswerEnabled() {
+	if !s.cfg.ChatEnabled() {
 		unavailable(w)
 		return
 	}
@@ -312,7 +353,8 @@ func (s *Service) sendMessage(w http.ResponseWriter, r *http.Request) {
 		unavailable(w)
 		return
 	}
-	messages := assemble(a, skill, question, history, citations)
+	toolName, toolResult, toolWarning := s.useMCPForQuestion(r.Context(), a.MCPToolNames, question)
+	messages := assembleWithMCP(a, skill, question, history, citations, toolName, toolResult)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		unavailable(w)
@@ -327,7 +369,7 @@ func (s *Service) sendMessage(w http.ResponseWriter, r *http.Request) {
 	if skill != nil {
 		skillName = skill.Name
 	}
-	writeEvent(w, flusher, "meta", map[string]any{"status": "ok", "skill": map[string]string{"name": skillName}, "citations": citations})
+	writeEvent(w, flusher, "meta", map[string]any{"status": "ok", "skill": map[string]string{"name": skillName}, "citations": citations, "mcp_tool_name": toolName, "mcp_warning": toolWarning})
 	var full strings.Builder
 	pending := ""
 	emit := func(chunk string) error {
@@ -373,12 +415,28 @@ func (s *Service) sendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	citationJSON, _ := json.Marshal(finalCitations)
-	result, err := s.db.ExecContext(r.Context(), `INSERT INTO tutor_messages(conversation_id,role,content,citations_json,skill_name) VALUES(?,'assistant',?,?,?)`, n, answer, citationJSON, skillName)
+	answerTx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeEvent(w, flusher, "error", map[string]string{"error": "保存回答失败，请重试"})
+		return
+	}
+	defer answerTx.Rollback()
+	result, err := answerTx.ExecContext(r.Context(), `INSERT INTO tutor_messages(conversation_id,role,content,citations_json,skill_name) VALUES(?,'assistant',?,?,?)`, n, answer, citationJSON, skillName)
 	if err != nil {
 		writeEvent(w, flusher, "error", map[string]string{"error": "保存回答失败，请重试"})
 		return
 	}
 	messageID, _ := result.LastInsertId()
+	if toolName != "" {
+		if _, err = answerTx.ExecContext(r.Context(), `INSERT INTO tutor_message_mcp_tools(message_id,tool_name) VALUES(?,?)`, messageID, toolName); err != nil {
+			writeEvent(w, flusher, "error", map[string]string{"error": "保存回答失败，请重试"})
+			return
+		}
+	}
+	if err = answerTx.Commit(); err != nil {
+		writeEvent(w, flusher, "error", map[string]string{"error": "保存回答失败，请重试"})
+		return
+	}
 	_, _ = s.db.ExecContext(r.Context(), `UPDATE tutor_conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?`, n)
 	writeEvent(w, flusher, "done", map[string]any{"message_id": messageID, "citations": finalCitations})
 }

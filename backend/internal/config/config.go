@@ -30,6 +30,9 @@ type Config struct {
 	ChatModel             string
 	QdrantURL             string
 	QdrantCollection      string
+	MCPServerURL          string
+	MCPAPIKey             string
+	MCPAllowedTools       string
 }
 
 func (cfg Config) VectorEnabled() bool {
@@ -38,6 +41,11 @@ func (cfg Config) VectorEnabled() bool {
 
 func (cfg Config) AnswerEnabled() bool {
 	return cfg.VectorEnabled() && cfg.ChatBaseURL != "" && cfg.ChatModel != ""
+}
+
+// Tutor chat can use keyword retrieval or no bound materials at all.
+func (cfg Config) ChatEnabled() bool {
+	return cfg.ChatBaseURL != "" && cfg.ChatModel != ""
 }
 
 func Load() (Config, error) {
@@ -100,6 +108,9 @@ func Load() (Config, error) {
 	cfg.ChatBaseURL = os.Getenv("CHAT_BASE_URL")
 	cfg.ChatAPIKey = os.Getenv("CHAT_API_KEY")
 	cfg.ChatModel = os.Getenv("CHAT_MODEL")
+	cfg.MCPServerURL = os.Getenv("MCP_SERVER_URL")
+	cfg.MCPAPIKey = os.Getenv("MCP_API_KEY")
+	cfg.MCPAllowedTools = os.Getenv("MCP_ALLOWED_TOOLS")
 	cfg.QdrantURL = os.Getenv("QDRANT_URL")
 	if cfg.QdrantURL == "" {
 		cfg.QdrantURL = "http://qdrant:6333"

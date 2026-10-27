@@ -6,6 +6,10 @@
 
 教师 SHALL 能维护本班智能体的名称、角色提示词、启用状态和技能/材料绑定，并维护至少一条从文本文件解析的「解题引导」技能。学生 MUST NOT 修改这些配置。跨班绑定 MUST 返回与不存在资源一致的 404。
 
+#### Scenario: Complete Markdown skill
+- **WHEN** 教师导入或编辑包含多节内容的 `skills.md`
+- **THEN** 服务端 SHALL 保存和返回完整原文，并把完整内容用于引导；页面 MUST NOT 把文件重组为固定字段后覆盖原文
+
 #### Scenario: Skill routing
 - **WHEN** 学生提问匹配多个已绑定、已启用技能
 - **THEN** 服务端 SHALL 按适用条件词法得分选择至多一个；同分取编号较小者，未绑定或停用技能 MUST NOT 参与
